@@ -1,0 +1,16 @@
+[Unit]
+Description=Crypto OKX REST Poller via CCXT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/workspace/crypto
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/workspace/crypto/.venv/bin/python /home/ubuntu/workspace/crypto/scripts/okx_ccxt_poll.py --symbol BTC/USDT --kind ticker --hostname www.okx.com --interval 2 --max-polls 0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

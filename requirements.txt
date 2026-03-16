@@ -1,1 +1,2 @@
+ccxt>=4,<5
 websockets>=16,<17
