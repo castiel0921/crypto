@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import ccxt
@@ -85,7 +85,7 @@ class OKXRestPoller:
                 time.sleep(self.retry_delay_seconds)
 
     def poll_once(self) -> PollResult:
-        fetched_at = datetime.now(UTC).isoformat()
+        fetched_at = datetime.now(timezone.utc).isoformat()
 
         if self.kind == "ticker":
             payload = self.exchange.fetch_ticker(self.symbol)
