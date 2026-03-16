@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable, Union
+
+OpportunityHandler = Callable[["Opportunity"], Union[Awaitable[None], None]]
 
 
 def _iso_now() -> str:
@@ -89,6 +92,7 @@ class ArbitrageMonitor:
         max_quote_age_seconds: float = 2.0,
         alert_cooldown_seconds: float = 5.0,
         webhook_url: str = "",
+        opportunity_handler: OpportunityHandler | None = None,
         pretty: bool = False,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -100,6 +104,7 @@ class ArbitrageMonitor:
         self.max_quote_age_seconds = max_quote_age_seconds
         self.alert_cooldown_seconds = alert_cooldown_seconds
         self.webhook_url = webhook_url
+        self.opportunity_handler = opportunity_handler
         self.pretty = pretty
         self.logger = logger or logging.getLogger(__name__)
         self._quotes: dict[str, BestQuote] = {}
@@ -117,6 +122,11 @@ class ArbitrageMonitor:
 
             self._last_alert_at[alert_key] = now
             print(opportunity.to_json(pretty=self.pretty))
+
+            if self.opportunity_handler is not None:
+                result = self.opportunity_handler(opportunity)
+                if inspect.isawaitable(result):
+                    await result
 
             if self.webhook_url:
                 await asyncio.to_thread(self._send_webhook, opportunity)

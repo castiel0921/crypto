@@ -1,10 +1,11 @@
 # crypto
 
-一个最小可运行的多交易所行情采集工程，当前包含三类能力：
+一个最小可运行的多交易所行情采集工程，当前包含四类能力：
 
 - `WebSocket`：实时订阅，延迟更低
 - `ccxt REST`：轮询拉取，部署更稳，适合 WebSocket 被拦的云服务器
 - `跨交易所盘口监控`：同时订阅 Binance 与 OKX，发现可套利价差时输出告警
+- `实时看板与 Lark 推送`：命中后推送到 Lark，自带一个可直接访问的内置前端
 
 ## 目录
 
@@ -27,12 +28,19 @@
     ├── arbitrage
     │   ├── __init__.py
     │   └── monitor.py
+    ├── dashboard
+    │   ├── __init__.py
+    │   ├── server.py
+    │   └── static
     ├── binance_rest
     │   ├── __init__.py
     │   └── client.py
     ├── binance_ws
     │   ├── __init__.py
     │   └── client.py
+    ├── notifications
+    │   ├── __init__.py
+    │   └── lark.py
     ├── okx_rest
     │   ├── __init__.py
     │   └── client.py
@@ -49,7 +57,8 @@
 - 订阅 `tickers`、`trades`、`books5`、`books`
 - 通过 Binance `bookTicker` 和 OKX `books5` 计算双边顶级盘口价差
 - 按手续费、净价差和盘口数量过滤告警
-- 命中后输出 JSON，可选推送到 webhook
+- 命中后输出 JSON，可推送到 Lark 自定义机器人
+- 内置一个实时看板页面，展示最新盘口、当前价差和最近机会
 - 轮询 `ticker`、`order-book`、`trades`
 - 空闲时发送文本 `ping`，收到 `pong` 后继续保持连接
 - 连接断开后自动重连
@@ -125,10 +134,17 @@ python3 scripts/binance_ws_test.py --symbol BTCUSDT --max-messages 5
 python3 scripts/cross_exchange_spread.py --symbol BTC-USDT --binance-fee-bps 10 --okx-fee-bps 10 --min-net-bps 2 --min-size 0.001
 ```
 
-如果你想把告警推到 webhook：
+如果你想推送到 Lark 并同时开启看板：
 
 ```bash
-python3 scripts/cross_exchange_spread.py --symbol BTC-USDT --webhook-url https://example.com/webhook
+LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/your-hook \
+python3 scripts/cross_exchange_spread.py --symbol BTC-USDT --dashboard-host 0.0.0.0 --dashboard-port 8080
+```
+
+默认看板地址：
+
+```text
+http://127.0.0.1:8080
 ```
 
 ## 常用参数
@@ -173,7 +189,12 @@ python3 scripts/cross_exchange_spread.py --help
 - `--min-size`：要求盘口可成交数量至少达到这个值
 - `--max-quote-age`：超过这个时效的报价不参与判断
 - `--alert-cooldown`：同一方向两次告警之间至少间隔多少秒
-- `--webhook-url`：命中后以 JSON POST 到你的告警入口
+- `--webhook-url`：命中后以 JSON POST 到通用 webhook
+- `--lark-webhook-url`：Lark 自定义机器人 webhook
+- `--lark-sign-secret`：如果 Lark 机器人开启了签名校验，则填这里
+- `--dashboard-host` / `--dashboard-port`：内置前端监听地址
+- `--dashboard-public-url`：写进 Lark 消息里的看板访问地址
+- `--disable-dashboard`：只跑监控和推送，不启动前端
 
 ## Ubuntu 部署
 
@@ -263,6 +284,27 @@ python3 -m venv .venv
 .venv/bin/python scripts/okx_ws_test.py --symbol BTC-USDT --channel tickers --max-messages 3
 ```
 
+然后验证套利监控 + 看板：
+
+```bash
+.venv/bin/python scripts/cross_exchange_spread.py --symbol BTC-USDT --dashboard-host 0.0.0.0 --dashboard-port 8080
+```
+
+如果你要推送到 Lark，推荐放进 `.env`：
+
+```bash
+cp .env.example .env
+```
+
+把 `.env` 里的值改成你自己的，例如：
+
+```dotenv
+LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/your-hook
+DASHBOARD_HOST=0.0.0.0
+DASHBOARD_PORT=8080
+DASHBOARD_PUBLIC_URL=http://YOUR_SERVER_IP:8080
+```
+
 ### 5. 配置 systemd 服务
 
 如果你的项目目录不是 `/home/ubuntu/workspace/crypto`，先把 service 文件里的路径替换成实际路径，例如 `/home/ubuntu/projects/crypto`。
@@ -292,6 +334,14 @@ sudo cp deploy/systemd/crypto-cross-spread.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now crypto-cross-spread
 sudo systemctl status crypto-cross-spread
+```
+
+这个服务会自动读取项目目录下的 `.env`。如果你在云服务器上使用的是 `/home/ubuntu/projects/crypto`，记得和其他 service 文件一样，先把 unit 里的 `/home/ubuntu/workspace/crypto` 替换掉。
+
+启动后，可以直接访问：
+
+```text
+http://YOUR_SERVER_IP:8080
 ```
 
 部署 WebSocket 服务：

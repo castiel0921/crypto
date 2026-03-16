@@ -5,12 +5,12 @@ import inspect
 import json
 import logging
 import re
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Union
 
 import websockets
 
 DEFAULT_STREAM_URL = "wss://data-stream.binance.vision/ws"
-MessageHandler = Callable[[dict[str, Any]], Awaitable[None] | None]
+MessageHandler = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 
 
 def normalize_symbol(symbol: str) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -15,6 +16,8 @@ if str(SRC_ROOT) not in sys.path:
 
 from arbitrage import ArbitrageMonitor, parse_binance_book_ticker, parse_okx_books5  # noqa: E402
 from binance_ws import BinanceBookTickerWebSocketClient  # noqa: E402
+from dashboard import DashboardStore, start_dashboard_server  # noqa: E402
+from notifications import LarkNotifier  # noqa: E402
 from okx_ws import OKXPublicWebSocketClient, Subscription  # noqa: E402
 
 
@@ -79,6 +82,37 @@ def parse_args() -> argparse.Namespace:
         help="Optional webhook URL for POSTing alert payloads",
     )
     parser.add_argument(
+        "--lark-webhook-url",
+        default=os.environ.get("LARK_WEBHOOK_URL", ""),
+        help="Lark custom bot webhook URL",
+    )
+    parser.add_argument(
+        "--lark-sign-secret",
+        default=os.environ.get("LARK_SIGN_SECRET", ""),
+        help="Optional Lark custom bot signing secret",
+    )
+    parser.add_argument(
+        "--dashboard-host",
+        default=os.environ.get("DASHBOARD_HOST", "127.0.0.1"),
+        help="Dashboard listen host",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=int(os.environ.get("DASHBOARD_PORT", "8080")),
+        help="Dashboard listen port",
+    )
+    parser.add_argument(
+        "--dashboard-public-url",
+        default=os.environ.get("DASHBOARD_PUBLIC_URL", ""),
+        help="Public dashboard URL for alert links",
+    )
+    parser.add_argument(
+        "--disable-dashboard",
+        action="store_true",
+        help="Disable the embedded dashboard server",
+    )
+    parser.add_argument(
         "--pretty",
         action="store_true",
         help="Pretty print alert JSON",
@@ -103,6 +137,34 @@ async def async_main() -> None:
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    logger = logging.getLogger(__name__)
+
+    dashboard_store = None
+    dashboard_runner = None
+    if not args.disable_dashboard:
+        dashboard_store = DashboardStore(
+            symbol=args.symbol,
+            binance_fee_bps=args.binance_fee_bps,
+            okx_fee_bps=args.okx_fee_bps,
+            min_net_bps=args.min_net_bps,
+            min_size=args.min_size,
+            max_quote_age_seconds=args.max_quote_age,
+            lark_enabled=bool(args.lark_webhook_url),
+        )
+        dashboard_runner = await start_dashboard_server(
+            dashboard_store,
+            host=args.dashboard_host,
+            port=args.dashboard_port,
+            logger=logger,
+        )
+
+    lark_notifier = None
+    if args.lark_webhook_url:
+        lark_notifier = LarkNotifier(
+            args.lark_webhook_url,
+            sign_secret=args.lark_sign_secret,
+            dashboard_url=args.dashboard_public_url,
+        )
 
     monitor = ArbitrageMonitor(
         symbol=args.symbol,
@@ -113,14 +175,39 @@ async def async_main() -> None:
         max_quote_age_seconds=args.max_quote_age,
         alert_cooldown_seconds=args.alert_cooldown,
         webhook_url=args.webhook_url,
+        opportunity_handler=None,
         pretty=args.pretty,
     )
 
+    async def handle_opportunity(opportunity) -> None:
+        if dashboard_store is not None:
+            await dashboard_store.record_opportunity(opportunity)
+
+        if lark_notifier is None:
+            return
+
+        try:
+            await lark_notifier.send(opportunity)
+            if dashboard_store is not None:
+                await dashboard_store.record_lark_delivery(ok=True, detail="Delivered to Lark")
+        except Exception as exc:
+            logger.warning("Failed to deliver Lark alert: %s", exc)
+            if dashboard_store is not None:
+                await dashboard_store.record_lark_delivery(ok=False, detail=str(exc))
+
+    monitor.opportunity_handler = handle_opportunity
+
     async def handle_binance(message: dict[str, object]) -> None:
-        await monitor.update_quote(parse_binance_book_ticker(message))
+        quote = parse_binance_book_ticker(message)
+        if dashboard_store is not None:
+            await dashboard_store.record_quote(quote)
+        await monitor.update_quote(quote)
 
     async def handle_okx(message: dict[str, object]) -> None:
-        await monitor.update_quote(parse_okx_books5(message))
+        quote = parse_okx_books5(message)
+        if dashboard_store is not None:
+            await dashboard_store.record_quote(quote)
+        await monitor.update_quote(quote)
 
     binance_client = BinanceBookTickerWebSocketClient(
         okx_to_binance_symbol(args.symbol),
@@ -137,10 +224,14 @@ async def async_main() -> None:
         message_handler=handle_okx,
     )
 
-    await asyncio.gather(
-        binance_client.run(),
-        okx_client.run(),
-    )
+    try:
+        await asyncio.gather(
+            binance_client.run(),
+            okx_client.run(),
+        )
+    finally:
+        if dashboard_runner is not None:
+            await dashboard_runner.cleanup()
 
 
 def main() -> None:

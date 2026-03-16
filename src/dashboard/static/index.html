@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spread Radar</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Realtime Monitor</p>
+          <h1>Spread Radar</h1>
+          <p class="subtitle">Cross-exchange top-of-book opportunities between Binance and OKX.</p>
+        </div>
+        <div class="hero-status">
+          <div class="status-pill" id="connection-pill">Connecting</div>
+          <div class="status-meta">
+            <span id="symbol-label">-</span>
+            <span id="started-at">-</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="summary-grid">
+        <article class="metric-card">
+          <span class="metric-label">Alerts</span>
+          <strong id="metric-opportunities">0</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Subscribers</span>
+          <strong id="metric-subscribers">0</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Lark</span>
+          <strong id="metric-lark">Idle</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Threshold</span>
+          <strong id="metric-threshold">-</strong>
+        </article>
+      </section>
+
+      <section class="panel-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <h2>Live Quotes</h2>
+            <span class="panel-tag">Top of book</span>
+          </div>
+          <div class="quote-grid" id="quotes"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <h2>Current Spreads</h2>
+            <span class="panel-tag">Net after fees</span>
+          </div>
+          <div class="spread-grid" id="spreads"></div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Recent Opportunities</h2>
+          <span class="panel-tag">Latest first</span>
+        </div>
+        <div class="opportunity-list" id="opportunities"></div>
+      </section>
+    </div>
+
+    <template id="quote-template">
+      <article class="quote-card">
+        <div class="quote-head">
+          <h3></h3>
+          <span class="quote-time"></span>
+        </div>
+        <div class="quote-row">
+          <span>Bid</span>
+          <strong class="quote-bid"></strong>
+          <span class="quote-size quote-bid-size"></span>
+        </div>
+        <div class="quote-row">
+          <span>Ask</span>
+          <strong class="quote-ask"></strong>
+          <span class="quote-size quote-ask-size"></span>
+        </div>
+      </article>
+    </template>
+
+    <template id="spread-template">
+      <article class="spread-card">
+        <div class="spread-head">
+          <h3></h3>
+          <span class="spread-badge"></span>
+        </div>
+        <div class="spread-line">
+          <span>Net</span>
+          <strong class="spread-net"></strong>
+        </div>
+        <div class="spread-line">
+          <span>Gross</span>
+          <strong class="spread-gross"></strong>
+        </div>
+        <div class="spread-line">
+          <span>Size</span>
+          <strong class="spread-size"></strong>
+        </div>
+      </article>
+    </template>
+
+    <template id="opportunity-template">
+      <article class="opportunity-card">
+        <div class="opportunity-head">
+          <div>
+            <h3></h3>
+            <p class="opportunity-time"></p>
+          </div>
+          <span class="opportunity-badge"></span>
+        </div>
+        <div class="opportunity-stats"></div>
+      </article>
+    </template>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

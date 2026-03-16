@@ -8,14 +8,14 @@ import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Union
 
 import websockets
 from websockets.asyncio.client import ClientConnection
 
 DEFAULT_PUBLIC_URL = "wss://ws.okx.com:8443/ws/v5/public"
 DEFAULT_DEMO_PUBLIC_URL = "wss://wspap.okx.com:8443/ws/v5/public"
-MessageHandler = Callable[[dict[str, Any]], Awaitable[None] | None]
+MessageHandler = Callable[[dict[str, Any]], Union[Awaitable[None], None]]
 
 
 @dataclass(slots=True, frozen=True)
