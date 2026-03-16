@@ -49,9 +49,31 @@ python3 scripts/okx_ws_test.py --help
 - `--demo`：切换到 OKX 模拟盘公共 WebSocket
 - `--url`：手动指定 WebSocket 地址
 - `--max-messages`：收到多少条数据后退出
+- `--max-messages 0`：持续运行，不自动退出，适合部署
 - `--heartbeat-interval`：空闲多少秒后发送文本 `ping`
 - `--reconnect-delay`：断开后多久重连
 - `--pretty`：格式化打印 JSON
+
+## Ubuntu 部署
+
+先做一次手工验证：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 scripts/okx_ws_test.py --symbol BTC-USDT --channel tickers --max-messages 5
+```
+
+如果要长期运行，建议使用 `systemd`：
+
+```bash
+sudo cp deploy/systemd/crypto-okx-ws.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now crypto-okx-ws
+sudo systemctl status crypto-okx-ws
+journalctl -u crypto-okx-ws -f
+```
 
 ## 推送代码
 

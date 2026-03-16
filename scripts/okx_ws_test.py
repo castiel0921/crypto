@@ -48,8 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-messages",
         type=int,
-        default=10,
-        help="Stop after receiving this many data messages",
+        default=0,
+        help="Stop after receiving this many data messages, 0 means run forever",
     )
     parser.add_argument(
         "--heartbeat-interval",
@@ -87,6 +87,7 @@ def resolve_url(args: argparse.Namespace) -> str:
 
 async def async_main() -> None:
     args = parse_args()
+    max_messages = args.max_messages if args.max_messages > 0 else None
 
     logging.basicConfig(
         level=getattr(logging, args.log_level),
@@ -100,7 +101,7 @@ async def async_main() -> None:
         reconnect_delay=args.reconnect_delay,
         pretty=args.pretty,
     )
-    await client.run(max_messages=args.max_messages)
+    await client.run(max_messages=max_messages)
 
 
 def main() -> None:

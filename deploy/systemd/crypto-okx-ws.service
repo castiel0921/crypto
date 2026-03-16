@@ -1,0 +1,16 @@
+[Unit]
+Description=Crypto OKX WebSocket Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/workspace/crypto
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/workspace/crypto/.venv/bin/python /home/ubuntu/workspace/crypto/scripts/okx_ws_test.py --symbol BTC-USDT --channel tickers --max-messages 0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
