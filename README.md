@@ -75,6 +75,21 @@ python3 scripts/okx_ws_test.py --symbol BTC-USDT --channel tickers --max-message
 python3 scripts/okx_ws_test.py --symbol BTC-USDT --channel books5 --max-messages 3 --pretty
 ```
 
+### 3. Binance REST 测试
+
+如果你要验证服务器是否能直接访问 Binance 公共行情接口，可以运行：
+
+```bash
+python3 scripts/binance_rest_poll.py --symbol BTC/USDT --kind ticker --max-polls 3
+```
+
+也可以测试盘口和成交：
+
+```bash
+python3 scripts/binance_rest_poll.py --symbol BTC/USDT --kind order-book --limit 5 --max-polls 3 --pretty
+python3 scripts/binance_rest_poll.py --symbol BTC/USDT --kind trades --limit 10 --max-polls 3
+```
+
 ## 常用参数
 
 ### ccxt REST
@@ -142,6 +157,99 @@ sudo cp deploy/systemd/crypto-okx-ws.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now crypto-okx-ws
 ```
+
+## 新服务器从 GitHub 部署
+
+当前仓库远程地址使用 SSH：
+
+```bash
+git@github.com:castiel0921/crypto.git
+```
+
+推荐在海外服务器上配置 GitHub SSH key，然后直接拉代码部署。
+
+### 1. 在服务器上生成 SSH key
+
+```bash
+ssh-keygen -t ed25519 -C "crypto-deploy" -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub
+```
+
+把输出的公钥添加到 GitHub 仓库的 Deploy keys，至少勾选读取权限。
+
+### 2. 测试服务器是否能访问 GitHub
+
+```bash
+ssh -T git@github.com
+```
+
+### 3. 克隆仓库并安装依赖
+
+```bash
+mkdir -p ~/workspace
+cd ~/workspace
+git clone git@github.com:castiel0921/crypto.git
+cd crypto
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+### 4. 手工验证脚本
+
+先验证 REST 轮询：
+
+```bash
+.venv/bin/python scripts/okx_ccxt_poll.py --symbol BTC/USDT --kind ticker --hostname www.okx.com --max-polls 3
+```
+
+如果网络允许，再验证 WebSocket：
+
+```bash
+.venv/bin/python scripts/okx_ws_test.py --symbol BTC-USDT --channel tickers --max-messages 3
+```
+
+### 5. 配置 systemd 服务
+
+部署 REST 服务：
+
+```bash
+sudo cp deploy/systemd/crypto-okx-rest.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now crypto-okx-rest
+sudo systemctl status crypto-okx-rest
+```
+
+部署 WebSocket 服务：
+
+```bash
+sudo cp deploy/systemd/crypto-okx-ws.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now crypto-okx-ws
+sudo systemctl status crypto-okx-ws
+```
+
+### 6. 后续更新代码并重启服务
+
+仓库已经提供一个更新脚本：
+
+```bash
+chmod +x deploy/update.sh
+./deploy/update.sh crypto-okx-rest
+```
+
+如果你当前部署的是 WebSocket 服务：
+
+```bash
+./deploy/update.sh crypto-okx-ws
+```
+
+如果只想拉代码和安装依赖，不重启服务：
+
+```bash
+./deploy/update.sh none
+```
+
+注意：脚本内部使用 `sudo -n systemctl`，因此服务器上的部署用户需要具备无交互的 `systemctl` 权限，否则脚本会失败。
 
 ## 推送代码
 
