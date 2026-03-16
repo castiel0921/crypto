@@ -74,20 +74,26 @@ class BinanceBookTickerWebSocketClient:
                 await asyncio.sleep(self.reconnect_delay)
 
     async def _handle_message(self, message: dict[str, Any]) -> bool:
-        if message.get("e") != "bookTicker":
+        payload = message.get("data") if "data" in message else message
+        if not isinstance(payload, dict) or not self._is_book_ticker_payload(payload):
             self.logger.info("Control message: %s", json.dumps(message, ensure_ascii=False))
             return False
 
         if self.message_handler is not None:
-            result = self.message_handler(message)
+            result = self.message_handler(payload)
             if inspect.isawaitable(result):
                 await result
 
         if self.print_messages:
-            print(self._format_message(message))
+            print(self._format_message(payload))
         return True
 
     def _format_message(self, message: dict[str, Any]) -> str:
         if self.pretty:
             return json.dumps(message, ensure_ascii=False, indent=2, sort_keys=True)
         return json.dumps(message, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _is_book_ticker_payload(message: dict[str, Any]) -> bool:
+        required_fields = {"u", "s", "b", "B", "a", "A"}
+        return required_fields.issubset(message)
