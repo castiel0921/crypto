@@ -1,0 +1,16 @@
+[Unit]
+Description=Crypto Cross-Exchange Spread Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/workspace/crypto
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/workspace/crypto/.venv/bin/python /home/ubuntu/workspace/crypto/scripts/cross_exchange_spread.py --symbol BTC-USDT --binance-fee-bps 10 --okx-fee-bps 10 --min-net-bps 2 --min-size 0.001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

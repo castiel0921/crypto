@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import websockets
 from websockets.asyncio.client import ClientConnection
 
 DEFAULT_PUBLIC_URL = "wss://ws.okx.com:8443/ws/v5/public"
 DEFAULT_DEMO_PUBLIC_URL = "wss://wspap.okx.com:8443/ws/v5/public"
+MessageHandler = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
 @dataclass(slots=True, frozen=True)
@@ -34,6 +36,8 @@ class OKXPublicWebSocketClient:
         heartbeat_interval: float = 20.0,
         reconnect_delay: float = 3.0,
         pretty: bool = False,
+        print_messages: bool = True,
+        message_handler: MessageHandler | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.subscription = subscription
@@ -41,6 +45,8 @@ class OKXPublicWebSocketClient:
         self.heartbeat_interval = heartbeat_interval
         self.reconnect_delay = reconnect_delay
         self.pretty = pretty
+        self.print_messages = print_messages
+        self.message_handler = message_handler
         self.logger = logger or logging.getLogger(__name__)
         self._last_message_at = 0.0
         self._awaiting_pong_since: float | None = None
@@ -85,7 +91,7 @@ class OKXPublicWebSocketClient:
                                 self.logger.warning("Received non-JSON message: %s", raw_message)
                                 continue
 
-                            is_data_message = self._handle_message(message)
+                            is_data_message = await self._handle_message(message)
                             if is_data_message:
                                 received_data_messages += 1
                                 if max_messages is not None and received_data_messages >= max_messages:
@@ -138,7 +144,7 @@ class OKXPublicWebSocketClient:
                 await websocket.close(code=1011, reason="OKX pong timeout")
                 return
 
-    def _handle_message(self, message: dict[str, Any]) -> bool:
+    async def _handle_message(self, message: dict[str, Any]) -> bool:
         event = message.get("event")
         if event == "subscribe":
             self.logger.info("Subscription confirmed by OKX: %s", json.dumps(message, ensure_ascii=False))
@@ -153,7 +159,12 @@ class OKXPublicWebSocketClient:
             raise RuntimeError(f"OKX subscription error {code}: {msg}")
 
         if "arg" in message and "data" in message:
-            print(self._format_message(message))
+            if self.message_handler is not None:
+                result = self.message_handler(message)
+                if inspect.isawaitable(result):
+                    await result
+            if self.print_messages:
+                print(self._format_message(message))
             return True
 
         self.logger.info("Control message: %s", json.dumps(message, ensure_ascii=False))

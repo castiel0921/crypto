@@ -1,9 +1,10 @@
 # crypto
 
-一个最小可运行的 OKX 行情采集工程，包含两条接入方案：
+一个最小可运行的多交易所行情采集工程，当前包含三类能力：
 
 - `WebSocket`：实时订阅，延迟更低
 - `ccxt REST`：轮询拉取，部署更稳，适合 WebSocket 被拦的云服务器
+- `跨交易所盘口监控`：同时订阅 Binance 与 OKX，发现可套利价差时输出告警
 
 ## 目录
 
@@ -11,13 +12,27 @@
 .
 ├── deploy
 │   └── systemd
+│       ├── crypto-binance-rest.service
+│       ├── crypto-cross-spread.service
 │       ├── crypto-okx-rest.service
 │       └── crypto-okx-ws.service
 ├── requirements.txt
 ├── scripts
+│   ├── binance_rest_poll.py
+│   ├── binance_ws_test.py
+│   ├── cross_exchange_spread.py
 │   ├── okx_ccxt_poll.py
 │   └── okx_ws_test.py
 └── src
+    ├── arbitrage
+    │   ├── __init__.py
+    │   └── monitor.py
+    ├── binance_rest
+    │   ├── __init__.py
+    │   └── client.py
+    ├── binance_ws
+    │   ├── __init__.py
+    │   └── client.py
     ├── okx_rest
     │   ├── __init__.py
     │   └── client.py
@@ -29,8 +44,12 @@
 ## 功能
 
 - 连接 OKX 公共 WebSocket
+- 连接 Binance 公共 WebSocket `bookTicker`
 - 通过 `ccxt` 轮询 OKX 公共 REST 行情
 - 订阅 `tickers`、`trades`、`books5`、`books`
+- 通过 Binance `bookTicker` 和 OKX `books5` 计算双边顶级盘口价差
+- 按手续费、净价差和盘口数量过滤告警
+- 命中后输出 JSON，可选推送到 webhook
 - 轮询 `ticker`、`order-book`、`trades`
 - 空闲时发送文本 `ping`，收到 `pong` 后继续保持连接
 - 连接断开后自动重连
@@ -90,6 +109,28 @@ python3 scripts/binance_rest_poll.py --symbol BTC/USDT --kind order-book --limit
 python3 scripts/binance_rest_poll.py --symbol BTC/USDT --kind trades --limit 10 --max-polls 3
 ```
 
+### 4. Binance WebSocket 测试
+
+如果你要验证服务器是否能实时拿到 Binance 顶级盘口：
+
+```bash
+python3 scripts/binance_ws_test.py --symbol BTCUSDT --max-messages 5
+```
+
+### 5. 跨交易所盘口价差监控
+
+同时订阅 Binance `bookTicker` 和 OKX `books5`，当两个交易所的顶级盘口满足净价差阈值时输出告警：
+
+```bash
+python3 scripts/cross_exchange_spread.py --symbol BTC-USDT --binance-fee-bps 10 --okx-fee-bps 10 --min-net-bps 2 --min-size 0.001
+```
+
+如果你想把告警推到 webhook：
+
+```bash
+python3 scripts/cross_exchange_spread.py --symbol BTC-USDT --webhook-url https://example.com/webhook
+```
+
 ## 常用参数
 
 ### ccxt REST
@@ -119,6 +160,20 @@ python3 scripts/okx_ws_test.py --help
 - `--max-messages 0`：持续运行，不自动退出，适合部署
 - `--heartbeat-interval`：空闲多少秒后发送文本 `ping`
 - `--reconnect-delay`：断开后多久重连
+
+### 跨交易所监控
+
+```bash
+python3 scripts/cross_exchange_spread.py --help
+```
+
+- `--symbol`：OKX 风格交易对，例如 `BTC-USDT`
+- `--binance-fee-bps` / `--okx-fee-bps`：两边假设的 taker 手续费
+- `--min-net-bps`：扣除手续费后，最小净价差阈值
+- `--min-size`：要求盘口可成交数量至少达到这个值
+- `--max-quote-age`：超过这个时效的报价不参与判断
+- `--alert-cooldown`：同一方向两次告警之间至少间隔多少秒
+- `--webhook-url`：命中后以 JSON POST 到你的告警入口
 
 ## Ubuntu 部署
 
@@ -228,6 +283,15 @@ sudo cp deploy/systemd/crypto-binance-rest.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now crypto-binance-rest
 sudo systemctl status crypto-binance-rest
+```
+
+部署跨交易所盘口监控服务：
+
+```bash
+sudo cp deploy/systemd/crypto-cross-spread.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now crypto-cross-spread
+sudo systemctl status crypto-cross-spread
 ```
 
 部署 WebSocket 服务：
