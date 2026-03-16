@@ -210,6 +210,8 @@ python3 -m venv .venv
 
 ### 5. 配置 systemd 服务
 
+如果你的项目目录不是 `/home/ubuntu/workspace/crypto`，先把 service 文件里的路径替换成实际路径，例如 `/home/ubuntu/projects/crypto`。
+
 部署 REST 服务：
 
 ```bash
@@ -217,6 +219,15 @@ sudo cp deploy/systemd/crypto-okx-rest.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now crypto-okx-rest
 sudo systemctl status crypto-okx-rest
+```
+
+部署 Binance REST 服务：
+
+```bash
+sudo cp deploy/systemd/crypto-binance-rest.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now crypto-binance-rest
+sudo systemctl status crypto-binance-rest
 ```
 
 部署 WebSocket 服务：
