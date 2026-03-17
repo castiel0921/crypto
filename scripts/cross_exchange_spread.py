@@ -57,7 +57,7 @@ async def poll_open_interest(
 
     while True:
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 # Step 1: Fetch OKX OI (batch — one request per instType)
                 okx_oi: dict[str, float] = {}  # canonical_symbol -> OI in USDT
                 for mt in perp_types:
@@ -161,7 +161,7 @@ async def poll_oi_daily_history(
 
     while True:
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 # Get current top symbols from store
                 current_oi = store._open_interest
                 top_symbols = [item["symbol"] for item in current_oi[:top_n]]
