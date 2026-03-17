@@ -46,6 +46,13 @@ function formatCompact(value, digits = 3) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
+function formatSig(value, sigFigs = 4) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  const n = Number(value);
+  if (n === 0) return "0";
+  return n.toPrecision(sigFigs);
+}
+
 function baseFromSymbol(symbol) {
   return symbol.split("-")[0];
 }
@@ -107,12 +114,13 @@ function renderSpreads(spreads) {
       <td><strong>${s.symbol}</strong></td>
       <td>${MARKET_LABELS[s.marketType] || s.marketType}</td>
       <td>买入 ${s.buyExchange.toUpperCase()} / 卖出 ${s.sellExchange.toUpperCase()}</td>
-      <td class="${s.netBps >= 0 ? "positive" : "negative"}">${s.netBps}</td>
-      <td>${s.grossSpread}</td>
-      <td>${s.buyPrice}</td>
-      <td>${s.sellPrice}</td>
-      <td>${s.executableSize} ${base}</td>
-      <td>${s.notional}</td>
+      <td class="${s.netBps >= 0 ? "positive" : "negative"}">${formatSig(s.netBps)}</td>
+      <td>${formatSig(s.grossSpread)}</td>
+      <td>${formatSig(s.buyPrice)}</td>
+      <td>${formatSig(s.sellPrice)}</td>
+      <td>${formatSig(s.executableSize)} ${base}</td>
+      <td>${formatSig(s.notional)}</td>
+      <td class="${s.netBps >= 0 ? "positive" : "negative"}">${formatSig(s.netBps / 10000 * 100)} USDT</td>
     `;
     elements.spreadBody.appendChild(tr);
   });
