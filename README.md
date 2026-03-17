@@ -201,7 +201,7 @@ python3 scripts/cross_exchange_spread.py --help
 推荐优先部署 `ccxt REST`：
 
 ```bash
-cd ~/workspace/crypto
+cd ~/projects/crypto
 git pull
 python3 -m venv .venv
 source .venv/bin/activate
@@ -307,7 +307,7 @@ DASHBOARD_PUBLIC_URL=http://YOUR_SERVER_IP:8080
 
 ### 5. 配置 systemd 服务
 
-如果你的项目目录不是 `/home/ubuntu/workspace/crypto`，先把 service 文件里的路径替换成实际路径，例如 `/home/ubuntu/projects/crypto`。
+如果你的项目目录不是 `/home/ubuntu/projects/crypto`，先把 service 文件里的路径替换成实际路径。
 
 部署 REST 服务：
 
@@ -336,7 +336,7 @@ sudo systemctl enable --now crypto-cross-spread
 sudo systemctl status crypto-cross-spread
 ```
 
-这个服务会自动读取项目目录下的 `.env`。如果你在云服务器上使用的是 `/home/ubuntu/projects/crypto`，记得和其他 service 文件一样，先把 unit 里的 `/home/ubuntu/workspace/crypto` 替换掉。
+这个服务会自动读取项目目录下的 `.env`。
 
 启动后，可以直接访问：
 

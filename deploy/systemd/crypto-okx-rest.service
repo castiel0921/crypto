@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/workspace/crypto
+WorkingDirectory=/home/ubuntu/projects/crypto
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/ubuntu/workspace/crypto/.venv/bin/python /home/ubuntu/workspace/crypto/scripts/okx_ccxt_poll.py --symbol BTC/USDT --kind ticker --hostname www.okx.com --interval 2 --max-polls 0
+ExecStart=/home/ubuntu/projects/crypto/.venv/bin/python /home/ubuntu/projects/crypto/scripts/okx_ccxt_poll.py --symbol BTC/USDT --kind ticker --hostname www.okx.com --interval 2 --max-polls 0
 Restart=always
 RestartSec=5
 
