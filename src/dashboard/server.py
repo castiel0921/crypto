@@ -67,6 +67,8 @@ class DashboardStore:
         self._price_history_last_record: dict[str, float] = {}  # symbol -> last record time
         self._price_history_window = 300.0  # 5 minutes
         self._price_movers_limit = 20
+        # Open interest data
+        self._open_interest: list[dict[str, Any]] = []
 
     async def record_quote(self, quote: BestQuote) -> None:
         key = (quote.symbol, quote.exchange)
@@ -133,6 +135,7 @@ class DashboardStore:
                 "minNotional": self.min_notional,
                 "maxQuoteAgeSeconds": self.max_quote_age_seconds,
             },
+            "openInterest": self._open_interest,
             "topSpreads": self._build_top_spreads(),
             "priceMovers": self._build_price_movers(),
             "recentOpportunities": list(self.recent_opportunities),
@@ -222,6 +225,10 @@ class DashboardStore:
                 and net_bps >= self.min_net_bps
             ),
         }
+
+    async def update_open_interest(self, data: list[dict[str, Any]]) -> None:
+        self._open_interest = data
+        await self.broadcast_snapshot()
 
     def _build_price_movers(self) -> list[dict[str, Any]]:
         """Compute top price movers over the 5-minute window."""

@@ -43,6 +43,28 @@
 
       <section class="panel">
         <div class="panel-heading">
+          <h2>合约持仓量 Top 20</h2>
+          <span class="panel-tag">每分钟更新</span>
+        </div>
+        <div class="spread-table-wrapper">
+          <table class="spread-table" id="oi-table">
+            <thead>
+              <tr>
+                <th>交易对</th>
+                <th>市场</th>
+                <th>Binance 持仓</th>
+                <th>OKX 持仓</th>
+                <th>总持仓</th>
+              </tr>
+            </thead>
+            <tbody id="oi-body"></tbody>
+          </table>
+          <div class="empty-state" id="oi-empty">等待持仓数据...</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
           <h2>5分钟涨跌幅</h2>
           <span class="panel-tag">实时更新</span>
         </div>

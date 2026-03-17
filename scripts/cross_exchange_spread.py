@@ -13,18 +13,138 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+import aiohttp  # noqa: E402
+
 from arbitrage import BestQuote, MultiArbitrageMonitor, parse_binance_book_ticker, parse_okx_books5  # noqa: E402
 from binance_ws import BinanceMultiStreamClient  # noqa: E402
 from dashboard import DashboardStore, start_dashboard_server  # noqa: E402
 from discovery import (  # noqa: E402
     MarketType,
     base_from_okx_symbol,
+    binance_rest_base_url,
     binance_stream_name,
+    binance_symbol,
     binance_ws_base_url,
     discover_common_pairs,
 )
 from notifications import LarkNotifier  # noqa: E402
 from okx_ws import OKXMultiSubClient, Subscription  # noqa: E402
+
+_OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
+
+
+async def _fetch_json(session: aiohttp.ClientSession, url: str, **params: str) -> dict:
+    async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        resp.raise_for_status()
+        return await resp.json()
+
+
+async def poll_open_interest(
+    store: DashboardStore,
+    market_types: list[MarketType],
+    all_pairs: dict[MarketType, list[str]],
+    interval: float = 60.0,
+    top_n: int = 20,
+) -> None:
+    """Periodically poll open interest from OKX and Binance, push top N to dashboard."""
+    poll_logger = logging.getLogger("open_interest")
+
+    # Only poll perpetual markets
+    perp_types = [mt for mt in market_types if mt != MarketType.SPOT]
+    if not perp_types:
+        poll_logger.info("No perpetual markets configured, skipping OI polling")
+        return
+
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Step 1: Fetch OKX OI (batch — one request per instType)
+                okx_oi: dict[str, float] = {}  # canonical_symbol -> OI in USDT
+                for mt in perp_types:
+                    inst_type = "SWAP"
+                    try:
+                        data = await _fetch_json(session, _OKX_OI_URL, instType=inst_type)
+                        for item in data.get("data", []):
+                            inst_id = item.get("instId", "")
+                            # Filter to our known pairs
+                            if inst_id in {p for p in all_pairs.get(mt, [])}:
+                                # oiCcy is in coin, convert using latest price if possible
+                                oi_ccy = float(item.get("oiCcy", 0))
+                                # Get latest price from dashboard store
+                                quote = store.latest_quotes.get((inst_id, "okx"))
+                                if quote:
+                                    price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
+                                    okx_oi[inst_id] = oi_ccy * price
+                                else:
+                                    okx_oi[inst_id] = oi_ccy  # fallback: raw coin amount
+                    except Exception as exc:
+                        poll_logger.warning("OKX OI fetch failed: %s", exc)
+
+                # Step 2: Sort by OKX OI to find top symbols, then query Binance for those
+                top_symbols = sorted(okx_oi.keys(), key=lambda s: okx_oi.get(s, 0), reverse=True)[:top_n]
+
+                binance_oi: dict[str, float] = {}  # canonical_symbol -> OI in USDT
+                for symbol in top_symbols:
+                    base = base_from_okx_symbol(symbol)
+                    # Determine market type from symbol
+                    if symbol.endswith("-USDT-SWAP"):
+                        mt = MarketType.USDT_PERP
+                    elif symbol.endswith("-USD-SWAP"):
+                        mt = MarketType.COIN_PERP
+                    else:
+                        continue
+
+                    bn_sym = binance_symbol(base, mt)
+                    bn_base_url = binance_rest_base_url(mt)
+                    if mt == MarketType.USDT_PERP:
+                        oi_path = "/fapi/v1/openInterest"
+                    else:
+                        oi_path = "/dapi/v1/openInterest"
+
+                    try:
+                        data = await _fetch_json(session, f"{bn_base_url}{oi_path}", symbol=bn_sym)
+                        oi_qty = float(data.get("openInterest", 0))
+                        # Convert to USDT using latest price
+                        quote = store.latest_quotes.get((symbol, "binance"))
+                        if quote:
+                            price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
+                            binance_oi[symbol] = oi_qty * price
+                        else:
+                            binance_oi[symbol] = oi_qty
+                    except Exception as exc:
+                        poll_logger.debug("Binance OI fetch for %s failed: %s", bn_sym, exc)
+
+                    # Small delay to respect rate limits
+                    await asyncio.sleep(0.1)
+
+                # Step 3: Merge and sort
+                result: list[dict] = []
+                for symbol in top_symbols:
+                    bn_val = binance_oi.get(symbol, 0)
+                    okx_val = okx_oi.get(symbol, 0)
+                    total = bn_val + okx_val
+                    if symbol.endswith("-USDT-SWAP"):
+                        mt_str = "usdt_perp"
+                    elif symbol.endswith("-USD-SWAP"):
+                        mt_str = "coin_perp"
+                    else:
+                        mt_str = "spot"
+                    result.append({
+                        "symbol": symbol,
+                        "marketType": mt_str,
+                        "binanceOI": bn_val,
+                        "okxOI": okx_val,
+                        "totalOI": total,
+                    })
+                result.sort(key=lambda x: x["totalOI"], reverse=True)
+
+                await store.update_open_interest(result[:top_n])
+                poll_logger.info("OI updated: %d symbols", len(result[:top_n]))
+
+        except Exception as exc:
+            poll_logger.warning("OI poll cycle failed: %s", exc)
+
+        await asyncio.sleep(interval)
 
 
 def parse_args() -> argparse.Namespace:
@@ -275,6 +395,12 @@ async def async_main() -> None:
 
         ws_tasks.append(asyncio.create_task(binance_client.run()))
         ws_tasks.append(asyncio.create_task(okx_client.run()))
+
+    # Open interest polling
+    if dashboard_store is not None:
+        ws_tasks.append(asyncio.create_task(
+            poll_open_interest(dashboard_store, market_types, all_pairs)
+        ))
 
     try:
         await asyncio.gather(*ws_tasks)

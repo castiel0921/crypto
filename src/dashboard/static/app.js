@@ -29,6 +29,8 @@ const elements = {
   spreadEmpty: document.getElementById("spread-empty"),
   moversBody: document.getElementById("movers-body"),
   moversEmpty: document.getElementById("movers-empty"),
+  oiBody: document.getElementById("oi-body"),
+  oiEmpty: document.getElementById("oi-empty"),
   opportunities: document.getElementById("opportunities"),
 };
 
@@ -63,6 +65,14 @@ function formatSig(value, sigFigs = 4) {
   return n.toFixed(leadingZeros + sigFigs);
 }
 
+function formatUSD(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  const n = Number(value);
+  if (n >= 1e8) return "$" + (n / 1e8).toFixed(2) + "亿";
+  if (n >= 1e4) return "$" + (n / 1e4).toFixed(2) + "万";
+  return "$" + n.toFixed(2);
+}
+
 function baseFromSymbol(symbol) {
   return symbol.split("-")[0];
 }
@@ -82,6 +92,7 @@ function renderMarketTabs(marketTypes) {
         elements.marketTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         currentMarketFilter = mt;
+        renderOpenInterest(latestState?.openInterest);
         renderMovers(latestState?.priceMovers);
         renderSpreads(latestState?.topSpreads);
         renderOpportunities(latestState?.recentOpportunities);
@@ -98,11 +109,39 @@ function renderMarketTabs(marketTypes) {
       elements.marketTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       allBtn.classList.add("active");
       currentMarketFilter = "all";
+      renderOpenInterest(latestState?.openInterest);
       renderMovers(latestState?.priceMovers);
       renderSpreads(latestState?.topSpreads);
       renderOpportunities(latestState?.recentOpportunities);
     });
   }
+}
+
+function renderOpenInterest(data) {
+  const filtered =
+    currentMarketFilter === "all"
+      ? data || []
+      : (data || []).filter((d) => d.marketType === currentMarketFilter);
+
+  elements.oiBody.innerHTML = "";
+
+  if (!filtered.length) {
+    elements.oiEmpty.style.display = "block";
+    return;
+  }
+  elements.oiEmpty.style.display = "none";
+
+  filtered.forEach((item) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><strong>${item.symbol}</strong></td>
+      <td>${MARKET_LABELS[item.marketType] || item.marketType}</td>
+      <td>${formatUSD(item.binanceOI)}</td>
+      <td>${formatUSD(item.okxOI)}</td>
+      <td><strong>${formatUSD(item.totalOI)}</strong></td>
+    `;
+    elements.oiBody.appendChild(tr);
+  });
 }
 
 function renderMovers(movers) {
@@ -219,6 +258,7 @@ function renderState(state) {
   elements.lark.textContent = LARK_STATUS_MAP[rawLarkStatus] || rawLarkStatus;
 
   renderMarketTabs(state.marketTypes);
+  renderOpenInterest(state.openInterest);
   renderMovers(state.priceMovers);
   renderSpreads(state.topSpreads);
   renderOpportunities(state.recentOpportunities);
