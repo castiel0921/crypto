@@ -249,6 +249,7 @@ class MultiArbitrageMonitor:
         okx_fee_bps: float = 0.0,
         min_net_bps: float = 0.0,
         min_size: float = 0.0,
+        min_notional: float = 0.0,
         max_quote_age_seconds: float = 2.0,
         alert_cooldown_seconds: float = 5.0,
         opportunity_handler: OpportunityHandler | None = None,
@@ -259,6 +260,7 @@ class MultiArbitrageMonitor:
         self.okx_fee_bps = okx_fee_bps
         self.min_net_bps = min_net_bps
         self.min_size = min_size
+        self.min_notional = min_notional
         self.max_quote_age_seconds = max_quote_age_seconds
         self.alert_cooldown_seconds = alert_cooldown_seconds
         self.opportunity_handler = opportunity_handler
@@ -336,6 +338,10 @@ class MultiArbitrageMonitor:
 
         executable_size = min(buy_q.ask_size, sell_q.bid_size)
         if executable_size < self.min_size:
+            return None
+
+        notional = executable_size * buy_q.ask_price
+        if notional < self.min_notional:
             return None
 
         gross_spread = sell_q.bid_price - buy_q.ask_price

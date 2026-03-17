@@ -114,6 +114,7 @@ function renderSpreads(spreads) {
       <td>${formatNumber(s.buyPrice, 2)}</td>
       <td>${formatNumber(s.sellPrice, 2)}</td>
       <td>${formatCompact(s.executableSize, 6)} ${base}</td>
+      <td>${formatNumber(s.notional, 2)}</td>
       <td><span class="spread-badge ${statusClass}">${statusText}</span></td>
     `;
     elements.spreadBody.appendChild(tr);

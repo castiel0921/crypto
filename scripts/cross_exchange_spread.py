@@ -67,6 +67,12 @@ def parse_args() -> argparse.Namespace:
         help="Minimum executable size at the top of book",
     )
     parser.add_argument(
+        "--min-notional",
+        type=float,
+        default=0.0,
+        help="Minimum notional value in USDT (size * price)",
+    )
+    parser.add_argument(
         "--max-quote-age",
         type=float,
         default=2.0,
@@ -165,6 +171,7 @@ async def async_main() -> None:
             okx_fee_bps=args.okx_fee_bps,
             min_net_bps=args.min_net_bps,
             min_size=args.min_size,
+            min_notional=args.min_notional,
             max_quote_age_seconds=args.max_quote_age,
             lark_enabled=bool(args.lark_webhook_url),
         )
@@ -190,6 +197,7 @@ async def async_main() -> None:
         okx_fee_bps=args.okx_fee_bps,
         min_net_bps=args.min_net_bps,
         min_size=args.min_size,
+        min_notional=args.min_notional,
         max_quote_age_seconds=args.max_quote_age,
         alert_cooldown_seconds=args.alert_cooldown,
         pretty=args.pretty,

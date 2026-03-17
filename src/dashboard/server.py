@@ -29,6 +29,7 @@ class DashboardStore:
         okx_fee_bps: float,
         min_net_bps: float,
         min_size: float,
+        min_notional: float,
         max_quote_age_seconds: float,
         lark_enabled: bool,
         max_opportunities: int = 500,
@@ -40,6 +41,7 @@ class DashboardStore:
         self.okx_fee_bps = okx_fee_bps
         self.min_net_bps = min_net_bps
         self.min_size = min_size
+        self.min_notional = min_notional
         self.max_quote_age_seconds = max_quote_age_seconds
         self.lark_enabled = lark_enabled
         self.started_at = _iso_now()
@@ -106,6 +108,7 @@ class DashboardStore:
                 "okxFeeBps": self.okx_fee_bps,
                 "minNetBps": self.min_net_bps,
                 "minSize": self.min_size,
+                "minNotional": self.min_notional,
                 "maxQuoteAgeSeconds": self.max_quote_age_seconds,
             },
             "topSpreads": self._build_top_spreads(),
@@ -172,6 +175,7 @@ class DashboardStore:
         buy_price = float(buy_quote["askPrice"])
         sell_price = float(sell_quote["bidPrice"])
         executable_size = min(float(buy_quote["askSize"]), float(sell_quote["bidSize"]))
+        notional = executable_size * buy_price
         gross_spread = sell_price - buy_price
         gross_bps = gross_spread / buy_price * 10_000 if buy_price > 0 else 0.0
         fee_bps = buy_fee_bps + sell_fee_bps
@@ -184,11 +188,16 @@ class DashboardStore:
             "buyPrice": buy_price,
             "sellPrice": sell_price,
             "executableSize": executable_size,
+            "notional": notional,
             "grossSpread": gross_spread,
             "grossBps": gross_bps,
             "netBps": net_bps,
             "feeBps": fee_bps,
-            "meetsThreshold": executable_size >= self.min_size and net_bps >= self.min_net_bps,
+            "meetsThreshold": (
+                executable_size >= self.min_size
+                and notional >= self.min_notional
+                and net_bps >= self.min_net_bps
+            ),
         }
 
     async def broadcast_snapshot(self) -> None:
