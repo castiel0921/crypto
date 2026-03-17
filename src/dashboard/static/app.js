@@ -31,11 +31,20 @@ const elements = {
   moversEmpty: document.getElementById("movers-empty"),
   oiBody: document.getElementById("oi-body"),
   oiEmpty: document.getElementById("oi-empty"),
+  oiChart: document.getElementById("oi-chart"),
   opportunities: document.getElementById("opportunities"),
 };
 
 let currentMarketFilter = "all";
 let latestState = null;
+let oiChartInstance = null;
+
+const CHART_COLORS = [
+  "#5eb0ff", "#2dd4a3", "#ff6b7a", "#ffd666", "#b388ff",
+  "#4fc3f7", "#81c784", "#ff8a65", "#ce93d8", "#90a4ae",
+  "#64ffda", "#ffab91", "#80cbc4", "#ef9a9a", "#a5d6a7",
+  "#fff59d", "#f48fb1", "#80deea", "#c5e1a5", "#bcaaa4",
+];
 
 function formatNumber(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -141,6 +150,74 @@ function renderOpenInterest(data) {
       <td><strong>${formatUSD(item.totalOI)}</strong></td>
     `;
     elements.oiBody.appendChild(tr);
+  });
+
+  renderOIChart(filtered);
+}
+
+function renderOIChart(data) {
+  const withHistory = (data || []).filter((d) => d.history && d.history.length >= 2);
+  if (!withHistory.length) return;
+
+  const datasets = withHistory.map((item, i) => {
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    return {
+      label: item.symbol.replace("-USDT-SWAP", "").replace("-USD-SWAP", ""),
+      data: item.history.map((h) => ({ x: h.t, y: h.v })),
+      borderColor: color,
+      backgroundColor: color + "20",
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+      hidden: i >= 5,
+    };
+  });
+
+  if (oiChartInstance) {
+    oiChartInstance.data.datasets = datasets;
+    oiChartInstance.update("none");
+    return;
+  }
+
+  oiChartInstance = new Chart(elements.oiChart, {
+    type: "line",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "top",
+          labels: {
+            color: "#94a3b8",
+            font: { size: 11 },
+            boxWidth: 12,
+            padding: 8,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${formatUSD(ctx.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: "time",
+          time: { unit: "minute", displayFormats: { minute: "HH:mm" } },
+          ticks: { color: "#64748b", maxTicksLimit: 12 },
+          grid: { color: "rgba(100,116,139,0.15)" },
+        },
+        y: {
+          ticks: {
+            color: "#64748b",
+            callback: (v) => formatUSD(v),
+          },
+          grid: { color: "rgba(100,116,139,0.15)" },
+        },
+      },
+    },
   });
 }
 

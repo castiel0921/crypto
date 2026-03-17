@@ -147,6 +147,12 @@ h1 {
   padding: 22px;
 }
 
+.oi-chart-wrapper {
+  margin-top: 16px;
+  height: 360px;
+  position: relative;
+}
+
 .panel-heading,
 .quote-head,
 .spread-head,
