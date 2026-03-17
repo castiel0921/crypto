@@ -157,7 +157,7 @@ async def poll_oi_daily_history(
         return
 
     # Wait for real-time OI to populate first
-    await asyncio.sleep(90)
+    await asyncio.sleep(70)
 
     while True:
         try:
@@ -192,17 +192,20 @@ async def poll_oi_daily_history(
                             period="1d",
                             limit="30",
                         )
-                        points = []
-                        for item in data:
-                            ts = int(item.get("timestamp", 0))
-                            val = float(item.get("sumOpenInterestValue", 0))
-                            iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts / 1000))
-                            points.append({"t": iso, "v": val})
-                        history[symbol] = points
+                        if isinstance(data, list):
+                            points = []
+                            for item in data:
+                                ts = int(item.get("timestamp", 0))
+                                val = float(item.get("sumOpenInterestValue", 0))
+                                iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts / 1000))
+                                points.append({"t": iso, "v": val})
+                            history[symbol] = points
+                        else:
+                            poll_logger.warning("Binance OI history for %s unexpected response: %s", bn_sym, str(data)[:200])
                     except Exception as exc:
-                        poll_logger.debug("Binance OI history for %s failed: %s", bn_sym, exc)
+                        poll_logger.warning("Binance OI history for %s failed: %s", bn_sym, exc)
 
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.5)
 
                 await store.update_oi_daily_history(history)
                 poll_logger.info("OI daily history updated: %d symbols", len(history))
