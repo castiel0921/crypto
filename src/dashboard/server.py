@@ -69,9 +69,6 @@ class DashboardStore:
         self._price_movers_limit = 20
         # Open interest data
         self._open_interest: list[dict[str, Any]] = []
-        # OI intraday history: symbol -> list of (iso_timestamp, total_oi_usdt)
-        self._oi_history: dict[str, list[tuple[str, float]]] = {}
-        self._oi_history_max = 1440  # 24h at 1-min intervals
         # OI 30-day daily history from Binance: symbol -> [{t, v}, ...]
         self._oi_daily_history: dict[str, list[dict[str, Any]]] = {}
 
@@ -232,22 +229,7 @@ class DashboardStore:
         }
 
     async def update_open_interest(self, data: list[dict[str, Any]]) -> None:
-        ts = _iso_now()
         for item in data:
-            symbol = item["symbol"]
-            total = item["totalOI"]
-            if symbol not in self._oi_history:
-                self._oi_history[symbol] = []
-            hist = self._oi_history[symbol]
-            hist.append((ts, total))
-            if len(hist) > self._oi_history_max:
-                hist[:] = hist[-self._oi_history_max:]
-        # Attach history to each item for frontend
-        for item in data:
-            item["history"] = [
-                {"t": t, "v": v}
-                for t, v in self._oi_history.get(item["symbol"], [])
-            ]
             item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])
         self._open_interest = data
         await self.broadcast_snapshot()
