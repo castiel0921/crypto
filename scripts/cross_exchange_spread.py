@@ -68,15 +68,10 @@ async def poll_open_interest(
                             inst_id = item.get("instId", "")
                             if inst_id not in {p for p in all_pairs.get(mt, [])}:
                                 continue
-                            oi_ccy = float(item.get("oiCcy", 0))
-                            # Must have a price to convert coin -> USDT
-                            quote = store.latest_quotes.get((inst_id, "okx"))
-                            if not quote:
-                                continue
-                            price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
-                            if price <= 0:
-                                continue
-                            okx_oi[inst_id] = oi_ccy * price
+                            # Use oiUsd directly from OKX API (already in USD)
+                            oi_usd = float(item.get("oiUsd", 0))
+                            if oi_usd > 0:
+                                okx_oi[inst_id] = oi_usd
                     except Exception as exc:
                         poll_logger.warning("OKX OI fetch failed: %s", exc)
 
