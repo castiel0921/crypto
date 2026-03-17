@@ -224,10 +224,7 @@ class DashboardStore:
 
 
 async def handle_index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(
-        STATIC_DIR / "index.html",
-        headers={"Cache-Control": "no-cache"},
-    )
+    return web.FileResponse(STATIC_DIR / "index.html")
 
 
 async def handle_state(request: web.Request) -> web.Response:
@@ -266,15 +263,20 @@ async def handle_sse(request: web.Request) -> web.StreamResponse:
     return response
 
 
+@web.middleware
+async def no_cache_middleware(request: web.Request, handler):
+    response = await handler(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
+
+
 def create_dashboard_app(store: DashboardStore) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache_middleware])
     app["store"] = store
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/state", handle_state)
     app.router.add_get("/api/events", handle_sse)
-    app.router.add_static(
-        "/static", STATIC_DIR, append_version=True,
-    )
+    app.router.add_static("/static", STATIC_DIR)
     return app
 
 
