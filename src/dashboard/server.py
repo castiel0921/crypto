@@ -244,6 +244,8 @@ class DashboardStore:
             if past_price is None or past_price == 0:
                 continue
             change_pct = (current_price - past_price) / past_price * 100.0
+            if abs(change_pct) < 1.0:
+                continue
             movers.append({
                 "symbol": symbol,
                 "marketType": self._infer_market_type(symbol),
