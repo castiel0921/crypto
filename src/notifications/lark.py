@@ -9,7 +9,23 @@ import time
 import urllib.request
 from typing import Any
 
+import math
+
 from arbitrage import Opportunity
+
+
+def _fmt(value: float, sig: int = 4) -> str:
+    """Format a float to *sig* significant figures without scientific notation."""
+    if value == 0:
+        return "0"
+    abs_val = abs(value)
+    if abs_val >= 1:
+        int_digits = int(math.log10(abs_val)) + 1
+        decimals = max(0, sig - int_digits)
+    else:
+        leading_zeros = -int(math.floor(math.log10(abs_val))) - 1
+        decimals = leading_zeros + sig
+    return f"{value:.{decimals}f}"
 
 
 class LarkNotifier:
@@ -50,15 +66,24 @@ class LarkNotifier:
             return result
 
     def _build_payload(self, opportunity: Opportunity) -> dict[str, Any]:
-        title = f"套利机会 {opportunity.symbol}"
-        direction = f"买入 {opportunity.buy_exchange.upper()} / 卖出 {opportunity.sell_exchange.upper()}"
+        o = opportunity
+        profit_100u = o.net_bps / 10000 * 100
+        title = f"套利机会 {o.symbol}"
+        direction = f"买入 {o.buy_exchange.upper()} / 卖出 {o.sell_exchange.upper()}"
         content = [
             [{"tag": "text", "text": direction}],
             [
                 {
                     "tag": "text",
+                    "text": f"净价差 {_fmt(o.net_bps)} bps | 毛价差 {_fmt(o.gross_spread)} USDT",
+                }
+            ],
+            [
+                {
+                    "tag": "text",
                     "text": (
-                        f"净价差 {opportunity.net_bps:.3f} bps | 毛价差 {opportunity.gross_spread:.2f} USDT"
+                        f"买价 {_fmt(o.buy_price)} | 卖价 {_fmt(o.sell_price)} | "
+                        f"数量 {_fmt(o.executable_size)}"
                     ),
                 }
             ],
@@ -66,15 +91,14 @@ class LarkNotifier:
                 {
                     "tag": "text",
                     "text": (
-                        f"买价 {opportunity.buy_price:.2f} | 卖价 {opportunity.sell_price:.2f} | "
-                        f"数量 {opportunity.executable_size:.6f}"
+                        f"手续费 {_fmt(o.fee_bps)} bps | 100U利润 {_fmt(profit_100u)} USDT"
                     ),
                 }
             ],
             [
                 {
                     "tag": "text",
-                    "text": f"手续费 {opportunity.fee_bps:.2f} bps | 时间 {opportunity.observed_at}",
+                    "text": f"时间 {o.observed_at}",
                 }
             ],
         ]

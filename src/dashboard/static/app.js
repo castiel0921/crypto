@@ -50,7 +50,15 @@ function formatSig(value, sigFigs = 4) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   const n = Number(value);
   if (n === 0) return "0";
-  return n.toPrecision(sigFigs);
+  const abs = Math.abs(n);
+  if (abs >= 1) {
+    const intDigits = Math.floor(Math.log10(abs)) + 1;
+    const decimals = Math.max(0, sigFigs - intDigits);
+    return n.toFixed(decimals);
+  }
+  // For values < 1, count leading zeros after decimal point
+  const leadingZeros = -Math.floor(Math.log10(abs)) - 1;
+  return n.toFixed(leadingZeros + sigFigs);
 }
 
 function baseFromSymbol(symbol) {
@@ -152,15 +160,15 @@ function renderOpportunities(opportunities) {
           <h3>买入 ${item.buy_exchange.toUpperCase()} → 卖出 ${item.sell_exchange.toUpperCase()}</h3>
           <p class="opportunity-time">${item.observed_at} · ${item.symbol} · ${marketLabel}</p>
         </div>
-        <span class="opportunity-badge ${badgeClass}">${formatCompact(item.net_bps, 3)} bps</span>
+        <span class="opportunity-badge ${badgeClass}">${formatSig(item.net_bps)} bps</span>
       </div>
       <div class="opportunity-stats">
-        <div class="stat-chip"><span>买价</span><strong>${formatNumber(item.buy_price, 2)} USDT</strong></div>
-        <div class="stat-chip"><span>卖价</span><strong>${formatNumber(item.sell_price, 2)} USDT</strong></div>
-        <div class="stat-chip"><span>毛价差</span><strong>${formatNumber(item.gross_spread, 2)} USDT</strong></div>
-        <div class="stat-chip"><span>可成交量</span><strong>${formatCompact(item.executable_size, 6)} ${base}</strong></div>
-        <div class="stat-chip"><span>手续费</span><strong>${formatCompact(item.fee_bps, 2)} bps</strong></div>
-        <div class="stat-chip"><span>交易对</span><strong>${item.symbol}</strong></div>
+        <div class="stat-chip"><span>买价</span><strong>${formatSig(item.buy_price)} USDT</strong></div>
+        <div class="stat-chip"><span>卖价</span><strong>${formatSig(item.sell_price)} USDT</strong></div>
+        <div class="stat-chip"><span>毛价差</span><strong>${formatSig(item.gross_spread)} USDT</strong></div>
+        <div class="stat-chip"><span>可成交量</span><strong>${formatSig(item.executable_size)} ${base}</strong></div>
+        <div class="stat-chip"><span>手续费</span><strong>${formatSig(item.fee_bps)} bps</strong></div>
+        <div class="stat-chip"><span>100U利润</span><strong>${formatSig(item.net_bps / 10000 * 100)} USDT</strong></div>
       </div>
     `;
     elements.opportunities.appendChild(card);
