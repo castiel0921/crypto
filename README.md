@@ -355,17 +355,23 @@ sudo systemctl status crypto-okx-ws
 
 ### 6. 后续更新代码并重启服务
 
-仓库已经提供一个更新脚本：
+仓库已经提供一个更新脚本，支持同时重启多个服务：
 
 ```bash
 chmod +x deploy/update.sh
-./deploy/update.sh crypto-okx-rest
+./deploy/update.sh crypto-cross-spread
 ```
 
-如果你当前部署的是 WebSocket 服务：
+重启多个服务：
 
 ```bash
-./deploy/update.sh crypto-okx-ws
+./deploy/update.sh crypto-cross-spread crypto-okx-rest
+```
+
+重启所有 crypto-* 服务：
+
+```bash
+./deploy/update.sh all
 ```
 
 如果只想拉代码和安装依赖，不重启服务：
@@ -375,6 +381,22 @@ chmod +x deploy/update.sh
 ```
 
 注意：脚本内部使用 `sudo -n systemctl`，因此服务器上的部署用户需要具备无交互的 `systemctl` 权限，否则脚本会失败。
+
+## 自动部署
+
+项目配置了 GitHub Actions，push 到 `main` 分支后会自动 SSH 到服务器执行部署脚本。
+
+### 配置 GitHub Secrets
+
+在仓库 Settings → Secrets and variables → Actions 中添加以下三个 Secret：
+
+| Secret 名称 | 说明 |
+|---|---|
+| `DEPLOY_HOST` | 服务器 IP |
+| `DEPLOY_USER` | SSH 用户名（如 `ubuntu`） |
+| `DEPLOY_SSH_KEY` | 服务器的 SSH 私钥（`cat ~/.ssh/id_ed25519`） |
+
+配置完成后，每次 `git push` 到 main 分支都会自动拉取代码、安装依赖并重启服务。
 
 ## 推送代码
 

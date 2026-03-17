@@ -42,7 +42,7 @@ function renderQuotes(quotes) {
   const entries = Object.values(quotes || {});
   elements.quotes.innerHTML = "";
   if (!entries.length) {
-    renderEmpty(elements.quotes, "Waiting for quotes...");
+    renderEmpty(elements.quotes, "等待报价...");
     return;
   }
 
@@ -61,15 +61,15 @@ function renderQuotes(quotes) {
 function renderSpreads(spreads) {
   elements.spreads.innerHTML = "";
   if (!spreads || !spreads.length) {
-    renderEmpty(elements.spreads, "Waiting for both exchanges...");
+    renderEmpty(elements.spreads, "等待双边数据...");
     return;
   }
 
   spreads.forEach((spread) => {
     const node = spreadTemplate.content.firstElementChild.cloneNode(true);
-    node.querySelector("h3").textContent = `Buy ${spread.buyExchange.toUpperCase()} / Sell ${spread.sellExchange.toUpperCase()}`;
+    node.querySelector("h3").textContent = `买入 ${spread.buyExchange.toUpperCase()} / 卖出 ${spread.sellExchange.toUpperCase()}`;
     const badge = node.querySelector(".spread-badge");
-    badge.textContent = spread.meetsThreshold ? "Threshold hit" : "Below threshold";
+    badge.textContent = spread.meetsThreshold ? "达到阈值" : "未达阈值";
     badge.classList.add(spread.meetsThreshold ? "positive" : "negative");
     const net = node.querySelector(".spread-net");
     net.textContent = `${formatCompact(spread.netBps, 3)} bps`;
@@ -83,25 +83,25 @@ function renderSpreads(spreads) {
 function renderOpportunities(opportunities) {
   elements.opportunities.innerHTML = "";
   if (!opportunities || !opportunities.length) {
-    renderEmpty(elements.opportunities, "No opportunity has passed the current filter yet.");
+    renderEmpty(elements.opportunities, "暂无满足筛选条件的套利机会");
     return;
   }
 
   opportunities.forEach((item) => {
     const node = opportunityTemplate.content.firstElementChild.cloneNode(true);
-    node.querySelector("h3").textContent = `${item.buy_exchange.toUpperCase()} -> ${item.sell_exchange.toUpperCase()}`;
+    node.querySelector("h3").textContent = `买入 ${item.buy_exchange.toUpperCase()} → 卖出 ${item.sell_exchange.toUpperCase()}`;
     node.querySelector(".opportunity-time").textContent = item.observed_at;
     const badge = node.querySelector(".opportunity-badge");
     badge.textContent = `${formatCompact(item.net_bps, 3)} bps`;
     badge.classList.add(item.net_bps >= 0 ? "positive" : "negative");
 
     const stats = [
-      ["Buy", `${formatNumber(item.buy_price, 2)} USDT`],
-      ["Sell", `${formatNumber(item.sell_price, 2)} USDT`],
-      ["Gross spread", `${formatNumber(item.gross_spread, 2)} USDT`],
-      ["Executable size", `${formatCompact(item.executable_size, 6)} BTC`],
-      ["Fees", `${formatCompact(item.fee_bps, 2)} bps`],
-      ["Symbol", item.symbol],
+      ["买价", `${formatNumber(item.buy_price, 2)} USDT`],
+      ["卖价", `${formatNumber(item.sell_price, 2)} USDT`],
+      ["毛价差", `${formatNumber(item.gross_spread, 2)} USDT`],
+      ["可成交量", `${formatCompact(item.executable_size, 6)} BTC`],
+      ["手续费", `${formatCompact(item.fee_bps, 2)} bps`],
+      ["交易对", item.symbol],
     ];
 
     const statsNode = node.querySelector(".opportunity-stats");
@@ -118,10 +118,12 @@ function renderOpportunities(opportunities) {
 
 function renderState(state) {
   elements.symbol.textContent = state.symbol || "-";
-  elements.startedAt.textContent = `Started ${state.startedAt || "-"}`;
+  elements.startedAt.textContent = `启动于 ${state.startedAt || "-"}`;
   elements.alerts.textContent = state.stats?.totalOpportunities ?? 0;
   elements.subscribers.textContent = state.stats?.subscriberCount ?? 0;
-  elements.lark.textContent = state.delivery?.lark?.lastStatus || "disabled";
+  const larkStatusMap = { ok: "正常", error: "异常", idle: "空闲", disabled: "未启用" };
+  const rawLarkStatus = state.delivery?.lark?.lastStatus || "disabled";
+  elements.lark.textContent = larkStatusMap[rawLarkStatus] || rawLarkStatus;
   elements.threshold.textContent = `${formatCompact(state.config?.minNetBps ?? 0, 2)} bps / ${formatCompact(state.config?.minSize ?? 0, 6)} BTC`;
 
   renderQuotes(state.quotes);
@@ -130,8 +132,11 @@ function renderState(state) {
 }
 
 function setConnectionStatus(status, detail = "") {
-  elements.connection.textContent = detail ? `${status}: ${detail}` : status;
   elements.connection.className = "status-pill";
+  const statusMap = { Live: "已连接", Error: "连接异常", Connecting: "连接中" };
+  elements.connection.textContent = detail
+    ? `${statusMap[status] || status}: ${detail}`
+    : statusMap[status] || status;
   if (status === "Live") {
     elements.connection.classList.add("ok");
   } else if (status === "Error") {
@@ -156,7 +161,7 @@ async function bootstrap() {
     setConnectionStatus("Live", "SSE");
   });
   stream.onerror = () => {
-    setConnectionStatus("Error", "SSE reconnecting");
+    setConnectionStatus("Error", "SSE 重连中");
   };
 }
 

@@ -3,15 +3,16 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: deploy/update.sh [service-name]
+Usage: deploy/update.sh [service-name ...]
 
 Pull the latest code from GitHub, sync Python dependencies, and optionally
-restart a systemd service.
+restart one or more systemd services.
 
 Arguments:
-  service-name   systemd service to restart after update
-                 default: crypto-okx-rest
+  service-name   systemd service(s) to restart after update (space-separated)
+                 default: crypto-cross-spread
                  use "none" to skip restart
+                 use "all" to restart all crypto-* services found in deploy/systemd
 
 Environment:
   REMOTE         git remote name, default: origin
@@ -24,14 +25,25 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-SERVICE_NAME="${1:-crypto-okx-rest}"
 REMOTE="${REMOTE:-origin}"
 BRANCH="${BRANCH:-main}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
 VENV_PIP="$ROOT_DIR/.venv/bin/pip"
 
-echo "[deploy] repo=$ROOT_DIR remote=$REMOTE branch=$BRANCH service=$SERVICE_NAME"
+# Collect service names
+SERVICES=()
+if [[ $# -eq 0 ]]; then
+  SERVICES=("crypto-cross-spread")
+elif [[ "$1" == "all" ]]; then
+  for f in "$ROOT_DIR"/deploy/systemd/crypto-*.service; do
+    SERVICES+=("$(basename "${f%.service}")")
+  done
+elif [[ "$1" != "none" ]]; then
+  SERVICES=("$@")
+fi
+
+echo "[deploy] repo=$ROOT_DIR remote=$REMOTE branch=$BRANCH services=${SERVICES[*]:-none}"
 
 cd "$ROOT_DIR"
 
@@ -47,11 +59,13 @@ fi
 echo "[deploy] installing dependencies"
 "$VENV_PIP" install -r "$ROOT_DIR/requirements.txt"
 
-if [[ "$SERVICE_NAME" == "none" ]]; then
+if [[ ${#SERVICES[@]} -eq 0 ]]; then
   echo "[deploy] skipping service restart"
   exit 0
 fi
 
-echo "[deploy] restarting $SERVICE_NAME"
-sudo -n systemctl restart "$SERVICE_NAME"
-sudo -n systemctl --no-pager --full status "$SERVICE_NAME"
+for svc in "${SERVICES[@]}"; do
+  echo "[deploy] restarting $svc"
+  sudo -n systemctl restart "$svc"
+  sudo -n systemctl --no-pager --full status "$svc"
+done

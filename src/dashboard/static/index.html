@@ -1,21 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Spread Radar</title>
+    <title>价差雷达</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <div class="page-shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Realtime Monitor</p>
-          <h1>Spread Radar</h1>
-          <p class="subtitle">Cross-exchange top-of-book opportunities between Binance and OKX.</p>
+          <p class="eyebrow">实时监控</p>
+          <h1>价差雷达</h1>
+          <p class="subtitle">Binance 与 OKX 跨交易所顶级盘口套利监控</p>
         </div>
         <div class="hero-status">
-          <div class="status-pill" id="connection-pill">Connecting</div>
+          <div class="status-pill" id="connection-pill">连接中</div>
           <div class="status-meta">
             <span id="symbol-label">-</span>
             <span id="started-at">-</span>
@@ -25,19 +25,19 @@
 
       <section class="summary-grid">
         <article class="metric-card">
-          <span class="metric-label">Alerts</span>
+          <span class="metric-label">告警次数</span>
           <strong id="metric-opportunities">0</strong>
         </article>
         <article class="metric-card">
-          <span class="metric-label">Subscribers</span>
+          <span class="metric-label">在线连接</span>
           <strong id="metric-subscribers">0</strong>
         </article>
         <article class="metric-card">
-          <span class="metric-label">Lark</span>
+          <span class="metric-label">飞书推送</span>
           <strong id="metric-lark">Idle</strong>
         </article>
         <article class="metric-card">
-          <span class="metric-label">Threshold</span>
+          <span class="metric-label">净价差阈值</span>
           <strong id="metric-threshold">-</strong>
         </article>
       </section>
@@ -45,16 +45,16 @@
       <section class="panel-grid">
         <article class="panel">
           <div class="panel-heading">
-            <h2>Live Quotes</h2>
-            <span class="panel-tag">Top of book</span>
+            <h2>实时盘口</h2>
+            <span class="panel-tag">顶级报价</span>
           </div>
           <div class="quote-grid" id="quotes"></div>
         </article>
 
         <article class="panel">
           <div class="panel-heading">
-            <h2>Current Spreads</h2>
-            <span class="panel-tag">Net after fees</span>
+            <h2>当前价差</h2>
+            <span class="panel-tag">扣除手续费</span>
           </div>
           <div class="spread-grid" id="spreads"></div>
         </article>
@@ -62,8 +62,8 @@
 
       <section class="panel">
         <div class="panel-heading">
-          <h2>Recent Opportunities</h2>
-          <span class="panel-tag">Latest first</span>
+          <h2>最近机会</h2>
+          <span class="panel-tag">最新优先</span>
         </div>
         <div class="opportunity-list" id="opportunities"></div>
       </section>
@@ -76,12 +76,12 @@
           <span class="quote-time"></span>
         </div>
         <div class="quote-row">
-          <span>Bid</span>
+          <span>买一</span>
           <strong class="quote-bid"></strong>
           <span class="quote-size quote-bid-size"></span>
         </div>
         <div class="quote-row">
-          <span>Ask</span>
+          <span>卖一</span>
           <strong class="quote-ask"></strong>
           <span class="quote-size quote-ask-size"></span>
         </div>
@@ -95,15 +95,15 @@
           <span class="spread-badge"></span>
         </div>
         <div class="spread-line">
-          <span>Net</span>
+          <span>净价差</span>
           <strong class="spread-net"></strong>
         </div>
         <div class="spread-line">
-          <span>Gross</span>
+          <span>毛价差</span>
           <strong class="spread-gross"></strong>
         </div>
         <div class="spread-line">
-          <span>Size</span>
+          <span>可成交量</span>
           <strong class="spread-size"></strong>
         </div>
       </article>
