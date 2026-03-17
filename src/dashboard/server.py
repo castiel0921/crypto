@@ -224,7 +224,10 @@ class DashboardStore:
 
 
 async def handle_index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(STATIC_DIR / "index.html")
+    return web.FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 async def handle_state(request: web.Request) -> web.Response:
@@ -269,7 +272,9 @@ def create_dashboard_app(store: DashboardStore) -> web.Application:
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/state", handle_state)
     app.router.add_get("/api/events", handle_sse)
-    app.router.add_static("/static", STATIC_DIR)
+    app.router.add_static(
+        "/static", STATIC_DIR, append_version=True,
+    )
     return app
 
 
