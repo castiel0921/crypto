@@ -66,17 +66,17 @@ async def poll_open_interest(
                         data = await _fetch_json(session, _OKX_OI_URL, instType=inst_type)
                         for item in data.get("data", []):
                             inst_id = item.get("instId", "")
-                            # Filter to our known pairs
-                            if inst_id in {p for p in all_pairs.get(mt, [])}:
-                                # oiCcy is in coin, convert using latest price if possible
-                                oi_ccy = float(item.get("oiCcy", 0))
-                                # Get latest price from dashboard store
-                                quote = store.latest_quotes.get((inst_id, "okx"))
-                                if quote:
-                                    price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
-                                    okx_oi[inst_id] = oi_ccy * price
-                                else:
-                                    okx_oi[inst_id] = oi_ccy  # fallback: raw coin amount
+                            if inst_id not in {p for p in all_pairs.get(mt, [])}:
+                                continue
+                            oi_ccy = float(item.get("oiCcy", 0))
+                            # Must have a price to convert coin -> USDT
+                            quote = store.latest_quotes.get((inst_id, "okx"))
+                            if not quote:
+                                continue
+                            price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
+                            if price <= 0:
+                                continue
+                            okx_oi[inst_id] = oi_ccy * price
                     except Exception as exc:
                         poll_logger.warning("OKX OI fetch failed: %s", exc)
 
@@ -86,7 +86,6 @@ async def poll_open_interest(
                 binance_oi: dict[str, float] = {}  # canonical_symbol -> OI in USDT
                 for symbol in top_symbols:
                     base = base_from_okx_symbol(symbol)
-                    # Determine market type from symbol
                     if symbol.endswith("-USDT-SWAP"):
                         mt = MarketType.USDT_PERP
                     elif symbol.endswith("-USD-SWAP"):
@@ -104,13 +103,14 @@ async def poll_open_interest(
                     try:
                         data = await _fetch_json(session, f"{bn_base_url}{oi_path}", symbol=bn_sym)
                         oi_qty = float(data.get("openInterest", 0))
-                        # Convert to USDT using latest price
+                        # Must have a price to convert coin -> USDT
                         quote = store.latest_quotes.get((symbol, "binance"))
-                        if quote:
-                            price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
-                            binance_oi[symbol] = oi_qty * price
-                        else:
-                            binance_oi[symbol] = oi_qty
+                        if not quote:
+                            continue
+                        price = (float(quote["bidPrice"]) + float(quote["askPrice"])) / 2
+                        if price <= 0:
+                            continue
+                        binance_oi[symbol] = oi_qty * price
                     except Exception as exc:
                         poll_logger.debug("Binance OI fetch for %s failed: %s", bn_sym, exc)
 
