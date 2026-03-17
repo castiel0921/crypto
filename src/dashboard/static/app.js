@@ -103,8 +103,6 @@ function renderSpreads(spreads) {
   filtered.forEach((s) => {
     const tr = document.createElement("tr");
     const base = baseFromSymbol(s.symbol);
-    const statusClass = s.meetsThreshold ? "positive" : "negative";
-    const statusText = s.meetsThreshold ? "达到阈值" : "未达阈值";
     tr.innerHTML = `
       <td><strong>${s.symbol}</strong></td>
       <td>${MARKET_LABELS[s.marketType] || s.marketType}</td>
@@ -115,7 +113,6 @@ function renderSpreads(spreads) {
       <td>${formatNumber(s.sellPrice, 2)}</td>
       <td>${formatCompact(s.executableSize, 6)} ${base}</td>
       <td>${formatNumber(s.notional, 2)}</td>
-      <td><span class="spread-badge ${statusClass}">${statusText}</span></td>
     `;
     elements.spreadBody.appendChild(tr);
   });

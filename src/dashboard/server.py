@@ -148,7 +148,7 @@ class DashboardStore:
                     buy_fee_bps=buy_fee,
                     sell_fee_bps=sell_fee,
                 )
-                if view["netBps"] > 0:
+                if view["meetsThreshold"]:
                     spreads.append(view)
 
         spreads.sort(key=lambda s: s["netBps"], reverse=True)
