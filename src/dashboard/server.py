@@ -14,6 +14,8 @@ from aiohttp import web
 from arbitrage import BestQuote, Opportunity
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+_CACHE_BUST = str(int(time.time()))
+_INDEX_HTML = (STATIC_DIR / "index.html").read_text().replace("{{CACHE_BUST}}", _CACHE_BUST)
 
 
 def _iso_now() -> str:
@@ -223,8 +225,8 @@ class DashboardStore:
         self._subscribers.discard(queue)
 
 
-async def handle_index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(STATIC_DIR / "index.html")
+async def handle_index(_: web.Request) -> web.Response:
+    return web.Response(text=_INDEX_HTML, content_type="text/html")
 
 
 async def handle_state(request: web.Request) -> web.Response:
