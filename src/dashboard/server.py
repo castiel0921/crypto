@@ -62,6 +62,11 @@ class DashboardStore:
         self._quote_refresh_interval = quote_refresh_interval
         self._last_snapshot_push = 0.0
         self._top_spreads_limit = top_spreads_limit
+        # Price history for 5-min movers: symbol -> deque of (monotonic_ts, mid_price)
+        self._price_history: dict[str, deque[tuple[float, float]]] = {}
+        self._price_history_last_record: dict[str, float] = {}  # symbol -> last record time
+        self._price_history_window = 300.0  # 5 minutes
+        self._price_movers_limit = 20
 
     async def record_quote(self, quote: BestQuote) -> None:
         key = (quote.symbol, quote.exchange)
@@ -76,6 +81,21 @@ class DashboardStore:
             "updatedAt": _iso_now(),
         }
         self.active_symbols.add(quote.symbol)
+
+        # Record price history (throttled: once per symbol per second)
+        now = time.monotonic()
+        last = self._price_history_last_record.get(quote.symbol, 0.0)
+        if now - last >= 1.0:
+            self._price_history_last_record[quote.symbol] = now
+            mid = (quote.bid_price + quote.ask_price) / 2.0
+            if quote.symbol not in self._price_history:
+                self._price_history[quote.symbol] = deque()
+            hist = self._price_history[quote.symbol]
+            hist.append((now, mid))
+            # Trim entries older than window
+            cutoff = now - self._price_history_window - 10.0  # 10s buffer
+            while hist and hist[0][0] < cutoff:
+                hist.popleft()
 
         now = time.monotonic()
         if now - self._last_snapshot_push >= self._quote_refresh_interval:
@@ -114,6 +134,7 @@ class DashboardStore:
                 "maxQuoteAgeSeconds": self.max_quote_age_seconds,
             },
             "topSpreads": self._build_top_spreads(),
+            "priceMovers": self._build_price_movers(),
             "recentOpportunities": list(self.recent_opportunities),
             "delivery": {
                 "lark": self.lark_status,
@@ -201,6 +222,36 @@ class DashboardStore:
                 and net_bps >= self.min_net_bps
             ),
         }
+
+    def _build_price_movers(self) -> list[dict[str, Any]]:
+        """Compute top price movers over the 5-minute window."""
+        now = time.monotonic()
+        cutoff = now - self._price_history_window
+        movers: list[dict[str, Any]] = []
+        for symbol, hist in self._price_history.items():
+            if len(hist) < 2:
+                continue
+            current_price = hist[-1][1]
+            # Find the oldest entry within window
+            past_price = None
+            for ts, price in hist:
+                if ts <= cutoff:
+                    past_price = price
+                else:
+                    if past_price is None:
+                        past_price = price
+                    break
+            if past_price is None or past_price == 0:
+                continue
+            change_pct = (current_price - past_price) / past_price * 100.0
+            movers.append({
+                "symbol": symbol,
+                "marketType": self._infer_market_type(symbol),
+                "price": current_price,
+                "changePct": change_pct,
+            })
+        movers.sort(key=lambda m: abs(m["changePct"]), reverse=True)
+        return movers[: self._price_movers_limit]
 
     async def broadcast_snapshot(self) -> None:
         snapshot = self.snapshot()

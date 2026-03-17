@@ -27,6 +27,8 @@ const elements = {
   marketTabs: document.getElementById("market-tabs"),
   spreadBody: document.getElementById("spread-body"),
   spreadEmpty: document.getElementById("spread-empty"),
+  moversBody: document.getElementById("movers-body"),
+  moversEmpty: document.getElementById("movers-empty"),
   opportunities: document.getElementById("opportunities"),
 };
 
@@ -80,6 +82,7 @@ function renderMarketTabs(marketTypes) {
         elements.marketTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         currentMarketFilter = mt;
+        renderMovers(latestState?.priceMovers);
         renderSpreads(latestState?.topSpreads);
         renderOpportunities(latestState?.recentOpportunities);
       });
@@ -95,10 +98,39 @@ function renderMarketTabs(marketTypes) {
       elements.marketTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       allBtn.classList.add("active");
       currentMarketFilter = "all";
+      renderMovers(latestState?.priceMovers);
       renderSpreads(latestState?.topSpreads);
       renderOpportunities(latestState?.recentOpportunities);
     });
   }
+}
+
+function renderMovers(movers) {
+  const filtered =
+    currentMarketFilter === "all"
+      ? movers || []
+      : (movers || []).filter((m) => m.marketType === currentMarketFilter);
+
+  elements.moversBody.innerHTML = "";
+
+  if (!filtered.length) {
+    elements.moversEmpty.style.display = "block";
+    return;
+  }
+  elements.moversEmpty.style.display = "none";
+
+  filtered.forEach((m) => {
+    const tr = document.createElement("tr");
+    const sign = m.changePct >= 0 ? "+" : "";
+    const cls = m.changePct >= 0 ? "positive" : "negative";
+    tr.innerHTML = `
+      <td><strong>${m.symbol}</strong></td>
+      <td>${MARKET_LABELS[m.marketType] || m.marketType}</td>
+      <td>${formatSig(m.price)}</td>
+      <td class="${cls}"><strong>${sign}${m.changePct.toFixed(2)}%</strong></td>
+    `;
+    elements.moversBody.appendChild(tr);
+  });
 }
 
 function renderSpreads(spreads) {
@@ -187,6 +219,7 @@ function renderState(state) {
   elements.lark.textContent = LARK_STATUS_MAP[rawLarkStatus] || rawLarkStatus;
 
   renderMarketTabs(state.marketTypes);
+  renderMovers(state.priceMovers);
   renderSpreads(state.topSpreads);
   renderOpportunities(state.recentOpportunities);
 }

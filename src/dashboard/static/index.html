@@ -43,6 +43,27 @@
 
       <section class="panel">
         <div class="panel-heading">
+          <h2>5分钟涨跌幅</h2>
+          <span class="panel-tag">实时更新</span>
+        </div>
+        <div class="spread-table-wrapper">
+          <table class="spread-table" id="movers-table">
+            <thead>
+              <tr>
+                <th>交易对</th>
+                <th>市场</th>
+                <th>最新价 (USDT)</th>
+                <th>5分钟涨跌幅</th>
+              </tr>
+            </thead>
+            <tbody id="movers-body"></tbody>
+          </table>
+          <div class="empty-state" id="movers-empty">等待价格数据积累...</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
           <h2>价差排行</h2>
           <div class="market-tabs" id="market-tabs">
             <button class="tab-btn active" data-market="all">全部</button>
