@@ -64,6 +64,16 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
   exit 0
 fi
 
+# Sync service files and reload systemd
+echo "[deploy] syncing systemd service files"
+for svc in "${SERVICES[@]}"; do
+  src_file="$ROOT_DIR/deploy/systemd/${svc}.service"
+  if [[ -f "$src_file" ]]; then
+    sudo -n cp "$src_file" /etc/systemd/system/
+  fi
+done
+sudo -n systemctl daemon-reload
+
 for svc in "${SERVICES[@]}"; do
   echo "[deploy] restarting $svc"
   sudo -n systemctl restart "$svc"
