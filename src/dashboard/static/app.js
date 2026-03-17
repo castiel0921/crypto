@@ -228,30 +228,45 @@ function renderOIDailyChart(data) {
   const withDaily = (data || []).filter((d) => d.dailyHistory && d.dailyHistory.length >= 2);
   if (!withDaily.length) return;
 
+  // Collect all unique dates and build aligned data
+  const allDatesSet = new Set();
+  withDaily.forEach((item) => {
+    item.dailyHistory.forEach((h) => {
+      // Normalize to date string (YYYY-MM-DD)
+      const d = typeof h.t === "string" ? h.t.slice(0, 10) : new Date(h.t).toISOString().slice(0, 10);
+      allDatesSet.add(d);
+    });
+  });
+  const labels = Array.from(allDatesSet).sort();
+
   const datasets = withDaily.map((item, i) => {
     const color = CHART_COLORS[i % CHART_COLORS.length];
+    // Build a map of date -> value for this symbol
+    const dateMap = {};
+    item.dailyHistory.forEach((h) => {
+      const d = typeof h.t === "string" ? h.t.slice(0, 10) : new Date(h.t).toISOString().slice(0, 10);
+      dateMap[d] = h.v;
+    });
     return {
       label: item.symbol.replace("-USDT-SWAP", "").replace("-USD-SWAP", ""),
-      data: item.dailyHistory.map((h) => ({ x: h.t, y: h.v })),
+      data: labels.map((d) => dateMap[d] || 0),
+      backgroundColor: color + "CC",
       borderColor: color,
-      backgroundColor: color + "20",
-      borderWidth: 2,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: 0.3,
-      hidden: i >= 5,
+      borderWidth: 1,
+      borderSkipped: false,
     };
   });
 
   if (oiDailyChartInstance) {
+    oiDailyChartInstance.data.labels = labels;
     oiDailyChartInstance.data.datasets = datasets;
     oiDailyChartInstance.update("none");
     return;
   }
 
   oiDailyChartInstance = new Chart(elements.oiDailyChart, {
-    type: "line",
-    data: { datasets },
+    type: "bar",
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -268,18 +283,23 @@ function renderOIDailyChart(data) {
         },
         tooltip: {
           callbacks: {
+            title: (items) => items[0]?.label || "",
             label: (ctx) => `${ctx.dataset.label}: ${formatUSD(ctx.parsed.y)}`,
+            footer: (items) => {
+              const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
+              return `合计: ${formatUSD(total)}`;
+            },
           },
         },
       },
       scales: {
         x: {
-          type: "time",
-          time: { unit: "day", displayFormats: { day: "MM-dd" } },
+          stacked: true,
           ticks: { color: "#64748b", maxTicksLimit: 15 },
           grid: { color: "rgba(100,116,139,0.15)" },
         },
         y: {
+          stacked: true,
           ticks: {
             color: "#64748b",
             callback: (v) => formatUSD(v),
