@@ -336,6 +336,30 @@ async def handle_sse(request: web.Request) -> web.StreamResponse:
     return response
 
 
+async def handle_debug_oi(request: web.Request) -> web.Response:
+    """Diagnostic: test Binance OI history API from this server."""
+    import aiohttp as _aiohttp
+
+    store: DashboardStore = request.app["store"]
+    symbol = request.query.get("symbol", "BTCUSDT")
+    url = f"https://fapi.binance.com/futures/data/openInterestHist"
+    result: dict[str, Any] = {
+        "url": url,
+        "params": {"symbol": symbol, "period": "1d", "limit": "3"},
+        "oi_count": len(store._open_interest),
+        "daily_history_symbols": len(store._oi_daily_history),
+    }
+    try:
+        async with _aiohttp.ClientSession(trust_env=True) as sess:
+            async with sess.get(url, params=result["params"], timeout=_aiohttp.ClientTimeout(total=10)) as resp:
+                result["status"] = resp.status
+                body = await resp.json()
+                result["response"] = body if isinstance(body, list) else body
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return web.json_response(result)
+
+
 @web.middleware
 async def no_cache_middleware(request: web.Request, handler):
     response = await handler(request)
@@ -349,6 +373,7 @@ def create_dashboard_app(store: DashboardStore) -> web.Application:
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/state", handle_state)
     app.router.add_get("/api/events", handle_sse)
+    app.router.add_get("/api/debug/oi", handle_debug_oi)
     app.router.add_static("/static", STATIC_DIR)
     return app
 
