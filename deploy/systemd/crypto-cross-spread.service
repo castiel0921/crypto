@@ -9,7 +9,7 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/projects/crypto
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/home/ubuntu/projects/crypto/.env
-ExecStart=/home/ubuntu/projects/crypto/.venv/bin/python /home/ubuntu/projects/crypto/scripts/cross_exchange_spread.py --symbol BTC-USDT --binance-fee-bps 10 --okx-fee-bps 10 --min-net-bps 2 --min-size 0.001 --dashboard-host 0.0.0.0 --dashboard-port 8080
+ExecStart=/home/ubuntu/projects/crypto/.venv/bin/python /home/ubuntu/projects/crypto/scripts/cross_exchange_spread.py --market-types spot,usdt_perp,coin_perp --binance-fee-bps 10 --okx-fee-bps 10 --min-net-bps 2 --min-size 0.001 --dashboard-host 0.0.0.0 --dashboard-port 8080
 Restart=always
 RestartSec=5
 

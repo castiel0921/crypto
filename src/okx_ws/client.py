@@ -174,3 +174,111 @@ class OKXPublicWebSocketClient:
         if self.pretty:
             return json.dumps(message, ensure_ascii=False, indent=2, sort_keys=True)
         return json.dumps(message, ensure_ascii=False, separators=(",", ":"))
+
+
+class OKXMultiSubClient:
+    """Connect to OKX public WebSocket with multiple subscriptions."""
+
+    MAX_SUBS_PER_CONN = 100
+
+    def __init__(
+        self,
+        subscriptions: list[Subscription],
+        *,
+        url: str = DEFAULT_PUBLIC_URL,
+        heartbeat_interval: float = 20.0,
+        reconnect_delay: float = 3.0,
+        message_handler: MessageHandler | None = None,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self.subscriptions = subscriptions
+        self.url = url
+        self.heartbeat_interval = heartbeat_interval
+        self.reconnect_delay = reconnect_delay
+        self.message_handler = message_handler
+        self.logger = logger or logging.getLogger(__name__)
+
+    async def run(self) -> None:
+        chunks = [
+            self.subscriptions[i : i + self.MAX_SUBS_PER_CONN]
+            for i in range(0, len(self.subscriptions), self.MAX_SUBS_PER_CONN)
+        ]
+        self.logger.info(
+            "OKX multi-sub: %d subscriptions across %d connection(s)",
+            len(self.subscriptions),
+            len(chunks),
+        )
+        await asyncio.gather(*(self._run_connection(chunk) for chunk in chunks))
+
+    async def _run_connection(self, subs: list[Subscription]) -> None:
+        while True:
+            try:
+                self.logger.info("Connecting to OKX (%d subscriptions)", len(subs))
+                async with websockets.connect(
+                    self.url,
+                    ping_interval=None,
+                    ping_timeout=None,
+                    open_timeout=10,
+                    close_timeout=5,
+                    max_queue=4096,
+                ) as ws:
+                    last_message_at = time.monotonic()
+
+                    # Subscribe in batches of 20 args per message
+                    for i in range(0, len(subs), 20):
+                        batch = subs[i : i + 20]
+                        payload = {
+                            "id": uuid.uuid4().hex[:8],
+                            "op": "subscribe",
+                            "args": [s.to_okx_arg() for s in batch],
+                        }
+                        await ws.send(json.dumps(payload))
+                    self.logger.info("Subscribed to %d OKX instruments", len(subs))
+
+                    async def heartbeat() -> None:
+                        nonlocal last_message_at
+                        awaiting_pong_since: float | None = None
+                        while True:
+                            await asyncio.sleep(self.heartbeat_interval)
+                            idle = time.monotonic() - last_message_at
+                            if idle < self.heartbeat_interval:
+                                continue
+                            if awaiting_pong_since is None:
+                                await ws.send("ping")
+                                awaiting_pong_since = time.monotonic()
+                                continue
+                            waited = time.monotonic() - awaiting_pong_since
+                            if waited >= self.heartbeat_interval:
+                                await ws.close(code=1011, reason="OKX pong timeout")
+                                return
+
+                    hb_task = asyncio.create_task(heartbeat())
+                    try:
+                        async for raw in ws:
+                            last_message_at = time.monotonic()
+
+                            if raw == "pong":
+                                continue
+                            if raw == "ping":
+                                await ws.send("pong")
+                                continue
+
+                            try:
+                                message = json.loads(raw)
+                            except json.JSONDecodeError:
+                                continue
+
+                            if "arg" in message and "data" in message:
+                                if self.message_handler is not None:
+                                    result = self.message_handler(message)
+                                    if inspect.isawaitable(result):
+                                        await result
+                    finally:
+                        hb_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await hb_task
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.logger.warning("OKX multi-sub connection dropped: %s", exc)
+                await asyncio.sleep(self.reconnect_delay)

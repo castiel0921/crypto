@@ -1,24 +1,40 @@
-const quoteTemplate = document.getElementById("quote-template");
-const spreadTemplate = document.getElementById("spread-template");
-const opportunityTemplate = document.getElementById("opportunity-template");
+const MARKET_LABELS = {
+  spot: "现货",
+  usdt_perp: "U本位永续",
+  coin_perp: "币本位永续",
+};
+
+const LARK_STATUS_MAP = {
+  ok: "正常",
+  error: "异常",
+  idle: "空闲",
+  disabled: "未启用",
+};
+
+const CONNECTION_STATUS_MAP = {
+  Live: "已连接",
+  Error: "连接异常",
+  Connecting: "连接中",
+};
 
 const elements = {
   connection: document.getElementById("connection-pill"),
-  symbol: document.getElementById("symbol-label"),
   startedAt: document.getElementById("started-at"),
+  symbols: document.getElementById("metric-symbols"),
   alerts: document.getElementById("metric-opportunities"),
-  subscribers: document.getElementById("metric-subscribers"),
   lark: document.getElementById("metric-lark"),
-  threshold: document.getElementById("metric-threshold"),
-  quotes: document.getElementById("quotes"),
-  spreads: document.getElementById("spreads"),
+  subscribers: document.getElementById("metric-subscribers"),
+  marketTabs: document.getElementById("market-tabs"),
+  spreadBody: document.getElementById("spread-body"),
+  spreadEmpty: document.getElementById("spread-empty"),
   opportunities: document.getElementById("opportunities"),
 };
 
+let currentMarketFilter = "all";
+let latestState = null;
+
 function formatNumber(value, digits = 2) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "-";
-  }
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return Number(value).toLocaleString(undefined, {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
@@ -26,117 +42,145 @@ function formatNumber(value, digits = 2) {
 }
 
 function formatCompact(value, digits = 3) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "-";
-  }
-  return Number(value).toLocaleString(undefined, {
-    maximumFractionDigits: digits,
-  });
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-function renderEmpty(container, text) {
-  container.innerHTML = `<div class="empty-state">${text}</div>`;
+function baseFromSymbol(symbol) {
+  return symbol.split("-")[0];
 }
 
-function renderQuotes(quotes) {
-  const entries = Object.values(quotes || {});
-  elements.quotes.innerHTML = "";
-  if (!entries.length) {
-    renderEmpty(elements.quotes, "等待报价...");
-    return;
-  }
+function renderMarketTabs(marketTypes) {
+  const existing = elements.marketTabs.querySelectorAll("[data-market]");
+  const existingKeys = new Set();
+  existing.forEach((btn) => existingKeys.add(btn.dataset.market));
 
-  entries.forEach((quote) => {
-    const node = quoteTemplate.content.firstElementChild.cloneNode(true);
-    node.querySelector("h3").textContent = quote.exchange.toUpperCase();
-    node.querySelector(".quote-time").textContent = quote.updatedAt || "-";
-    node.querySelector(".quote-bid").textContent = formatNumber(quote.bidPrice, 2);
-    node.querySelector(".quote-bid-size").textContent = `${formatCompact(quote.bidSize, 6)} BTC`;
-    node.querySelector(".quote-ask").textContent = formatNumber(quote.askPrice, 2);
-    node.querySelector(".quote-ask-size").textContent = `${formatCompact(quote.askSize, 6)} BTC`;
-    elements.quotes.appendChild(node);
+  (marketTypes || []).forEach((mt) => {
+    if (!existingKeys.has(mt)) {
+      const btn = document.createElement("button");
+      btn.className = "tab-btn";
+      btn.dataset.market = mt;
+      btn.textContent = MARKET_LABELS[mt] || mt;
+      btn.addEventListener("click", () => {
+        elements.marketTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentMarketFilter = mt;
+        renderSpreads(latestState?.topSpreads);
+        renderOpportunities(latestState?.recentOpportunities);
+      });
+      elements.marketTabs.appendChild(btn);
+    }
   });
+
+  // "all" tab handler
+  const allBtn = elements.marketTabs.querySelector('[data-market="all"]');
+  if (allBtn && !allBtn._bound) {
+    allBtn._bound = true;
+    allBtn.addEventListener("click", () => {
+      elements.marketTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      allBtn.classList.add("active");
+      currentMarketFilter = "all";
+      renderSpreads(latestState?.topSpreads);
+      renderOpportunities(latestState?.recentOpportunities);
+    });
+  }
 }
 
 function renderSpreads(spreads) {
-  elements.spreads.innerHTML = "";
-  if (!spreads || !spreads.length) {
-    renderEmpty(elements.spreads, "等待双边数据...");
+  const filtered =
+    currentMarketFilter === "all"
+      ? spreads || []
+      : (spreads || []).filter((s) => s.marketType === currentMarketFilter);
+
+  elements.spreadBody.innerHTML = "";
+
+  if (!filtered.length) {
+    elements.spreadEmpty.style.display = "block";
     return;
   }
+  elements.spreadEmpty.style.display = "none";
 
-  spreads.forEach((spread) => {
-    const node = spreadTemplate.content.firstElementChild.cloneNode(true);
-    node.querySelector("h3").textContent = `买入 ${spread.buyExchange.toUpperCase()} / 卖出 ${spread.sellExchange.toUpperCase()}`;
-    const badge = node.querySelector(".spread-badge");
-    badge.textContent = spread.meetsThreshold ? "达到阈值" : "未达阈值";
-    badge.classList.add(spread.meetsThreshold ? "positive" : "negative");
-    const net = node.querySelector(".spread-net");
-    net.textContent = `${formatCompact(spread.netBps, 3)} bps`;
-    net.classList.add(spread.netBps >= 0 ? "positive" : "negative");
-    node.querySelector(".spread-gross").textContent = `${formatNumber(spread.grossSpread, 2)} USDT`;
-    node.querySelector(".spread-size").textContent = `${formatCompact(spread.executableSize, 6)} BTC`;
-    elements.spreads.appendChild(node);
+  filtered.forEach((s) => {
+    const tr = document.createElement("tr");
+    const base = baseFromSymbol(s.symbol);
+    const statusClass = s.meetsThreshold ? "positive" : "negative";
+    const statusText = s.meetsThreshold ? "达到阈值" : "未达阈值";
+    tr.innerHTML = `
+      <td><strong>${s.symbol}</strong></td>
+      <td>${MARKET_LABELS[s.marketType] || s.marketType}</td>
+      <td>买入 ${s.buyExchange.toUpperCase()} / 卖出 ${s.sellExchange.toUpperCase()}</td>
+      <td class="${s.netBps >= 0 ? "positive" : "negative"}">${formatCompact(s.netBps, 3)}</td>
+      <td>${formatNumber(s.grossSpread, 2)}</td>
+      <td>${formatNumber(s.buyPrice, 2)}</td>
+      <td>${formatNumber(s.sellPrice, 2)}</td>
+      <td>${formatCompact(s.executableSize, 6)} ${base}</td>
+      <td><span class="spread-badge ${statusClass}">${statusText}</span></td>
+    `;
+    elements.spreadBody.appendChild(tr);
   });
 }
 
 function renderOpportunities(opportunities) {
   elements.opportunities.innerHTML = "";
-  if (!opportunities || !opportunities.length) {
-    renderEmpty(elements.opportunities, "暂无满足筛选条件的套利机会");
+  const filtered =
+    currentMarketFilter === "all"
+      ? opportunities || []
+      : (opportunities || []).filter((o) => o.market_type === currentMarketFilter);
+
+  if (!filtered.length) {
+    elements.opportunities.innerHTML = '<div class="empty-state">暂无满足筛选条件的套利机会</div>';
     return;
   }
 
-  opportunities.forEach((item) => {
-    const node = opportunityTemplate.content.firstElementChild.cloneNode(true);
-    node.querySelector("h3").textContent = `买入 ${item.buy_exchange.toUpperCase()} → 卖出 ${item.sell_exchange.toUpperCase()}`;
-    node.querySelector(".opportunity-time").textContent = item.observed_at;
-    const badge = node.querySelector(".opportunity-badge");
-    badge.textContent = `${formatCompact(item.net_bps, 3)} bps`;
-    badge.classList.add(item.net_bps >= 0 ? "positive" : "negative");
+  filtered.forEach((item) => {
+    const base = baseFromSymbol(item.symbol);
+    const card = document.createElement("article");
+    card.className = "opportunity-card";
 
-    const stats = [
-      ["买价", `${formatNumber(item.buy_price, 2)} USDT`],
-      ["卖价", `${formatNumber(item.sell_price, 2)} USDT`],
-      ["毛价差", `${formatNumber(item.gross_spread, 2)} USDT`],
-      ["可成交量", `${formatCompact(item.executable_size, 6)} BTC`],
-      ["手续费", `${formatCompact(item.fee_bps, 2)} bps`],
-      ["交易对", item.symbol],
-    ];
+    const badgeClass = item.net_bps >= 0 ? "positive" : "negative";
+    const marketLabel = MARKET_LABELS[item.market_type] || item.market_type;
 
-    const statsNode = node.querySelector(".opportunity-stats");
-    stats.forEach(([label, value]) => {
-      const chip = document.createElement("div");
-      chip.className = "stat-chip";
-      chip.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
-      statsNode.appendChild(chip);
-    });
-
-    elements.opportunities.appendChild(node);
+    card.innerHTML = `
+      <div class="opportunity-head">
+        <div>
+          <h3>买入 ${item.buy_exchange.toUpperCase()} → 卖出 ${item.sell_exchange.toUpperCase()}</h3>
+          <p class="opportunity-time">${item.observed_at} · ${item.symbol} · ${marketLabel}</p>
+        </div>
+        <span class="opportunity-badge ${badgeClass}">${formatCompact(item.net_bps, 3)} bps</span>
+      </div>
+      <div class="opportunity-stats">
+        <div class="stat-chip"><span>买价</span><strong>${formatNumber(item.buy_price, 2)} USDT</strong></div>
+        <div class="stat-chip"><span>卖价</span><strong>${formatNumber(item.sell_price, 2)} USDT</strong></div>
+        <div class="stat-chip"><span>毛价差</span><strong>${formatNumber(item.gross_spread, 2)} USDT</strong></div>
+        <div class="stat-chip"><span>可成交量</span><strong>${formatCompact(item.executable_size, 6)} ${base}</strong></div>
+        <div class="stat-chip"><span>手续费</span><strong>${formatCompact(item.fee_bps, 2)} bps</strong></div>
+        <div class="stat-chip"><span>交易对</span><strong>${item.symbol}</strong></div>
+      </div>
+    `;
+    elements.opportunities.appendChild(card);
   });
 }
 
 function renderState(state) {
-  elements.symbol.textContent = state.symbol || "-";
+  latestState = state;
+
   elements.startedAt.textContent = `启动于 ${state.startedAt || "-"}`;
+  elements.symbols.textContent = state.stats?.activeSymbols ?? 0;
   elements.alerts.textContent = state.stats?.totalOpportunities ?? 0;
   elements.subscribers.textContent = state.stats?.subscriberCount ?? 0;
-  const larkStatusMap = { ok: "正常", error: "异常", idle: "空闲", disabled: "未启用" };
-  const rawLarkStatus = state.delivery?.lark?.lastStatus || "disabled";
-  elements.lark.textContent = larkStatusMap[rawLarkStatus] || rawLarkStatus;
-  elements.threshold.textContent = `${formatCompact(state.config?.minNetBps ?? 0, 2)} bps / ${formatCompact(state.config?.minSize ?? 0, 6)} BTC`;
 
-  renderQuotes(state.quotes);
-  renderSpreads(state.currentSpreads);
+  const rawLarkStatus = state.delivery?.lark?.lastStatus || "disabled";
+  elements.lark.textContent = LARK_STATUS_MAP[rawLarkStatus] || rawLarkStatus;
+
+  renderMarketTabs(state.marketTypes);
+  renderSpreads(state.topSpreads);
   renderOpportunities(state.recentOpportunities);
 }
 
 function setConnectionStatus(status, detail = "") {
   elements.connection.className = "status-pill";
-  const statusMap = { Live: "已连接", Error: "连接异常", Connecting: "连接中" };
-  elements.connection.textContent = detail
-    ? `${statusMap[status] || status}: ${detail}`
-    : statusMap[status] || status;
+  const label = CONNECTION_STATUS_MAP[status] || status;
+  elements.connection.textContent = detail ? `${label}: ${detail}` : label;
   if (status === "Live") {
     elements.connection.classList.add("ok");
   } else if (status === "Error") {

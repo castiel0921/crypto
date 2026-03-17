@@ -1,3 +1,3 @@
-from .client import BinanceBookTickerWebSocketClient, DEFAULT_STREAM_URL
+from .client import BinanceBookTickerWebSocketClient, BinanceMultiStreamClient, DEFAULT_STREAM_URL
 
-__all__ = ["BinanceBookTickerWebSocketClient", "DEFAULT_STREAM_URL"]
+__all__ = ["BinanceBookTickerWebSocketClient", "BinanceMultiStreamClient", "DEFAULT_STREAM_URL"]

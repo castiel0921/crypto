@@ -97,3 +97,74 @@ class BinanceBookTickerWebSocketClient:
     def _is_book_ticker_payload(message: dict[str, Any]) -> bool:
         required_fields = {"u", "s", "b", "B", "a", "A"}
         return required_fields.issubset(message)
+
+
+class BinanceMultiStreamClient:
+    """Connect to Binance combined stream for multiple bookTicker streams."""
+
+    MAX_STREAMS_PER_CONN = 200
+
+    def __init__(
+        self,
+        streams: list[str],
+        *,
+        base_url: str = DEFAULT_STREAM_URL,
+        reconnect_delay: float = 3.0,
+        message_handler: MessageHandler | None = None,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self.streams = streams
+        self.base_url = base_url.rstrip("/").replace("/ws", "")
+        self.reconnect_delay = reconnect_delay
+        self.message_handler = message_handler
+        self.logger = logger or logging.getLogger(__name__)
+
+    async def run(self) -> None:
+        chunks = [
+            self.streams[i : i + self.MAX_STREAMS_PER_CONN]
+            for i in range(0, len(self.streams), self.MAX_STREAMS_PER_CONN)
+        ]
+        self.logger.info(
+            "Binance multi-stream: %d streams across %d connection(s)",
+            len(self.streams),
+            len(chunks),
+        )
+        await asyncio.gather(*(self._run_connection(chunk) for chunk in chunks))
+
+    async def _run_connection(self, streams: list[str]) -> None:
+        stream_path = "/".join(streams)
+        url = f"{self.base_url}/stream?streams={stream_path}"
+
+        while True:
+            try:
+                self.logger.info("Connecting to Binance combined stream (%d streams)", len(streams))
+                async with websockets.connect(
+                    url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    open_timeout=10,
+                    close_timeout=5,
+                    max_queue=4096,
+                ) as ws:
+                    async for raw in ws:
+                        try:
+                            message = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+
+                        data = message.get("data")
+                        if not isinstance(data, dict):
+                            continue
+
+                        if not BinanceBookTickerWebSocketClient._is_book_ticker_payload(data):
+                            continue
+
+                        if self.message_handler is not None:
+                            result = self.message_handler(data)
+                            if inspect.isawaitable(result):
+                                await result
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.logger.warning("Binance combined stream dropped: %s", exc)
+                await asyncio.sleep(self.reconnect_delay)

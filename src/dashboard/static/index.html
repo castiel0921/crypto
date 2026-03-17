@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>价差雷达</title>
+    <title>套利策略</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -11,13 +11,12 @@
       <header class="hero">
         <div>
           <p class="eyebrow">实时监控</p>
-          <h1>价差雷达</h1>
-          <p class="subtitle">Binance 与 OKX 跨交易所顶级盘口套利监控</p>
+          <h1>套利策略</h1>
+          <p class="subtitle">Binance 与 OKX 跨交易所多市场套利监控</p>
         </div>
         <div class="hero-status">
           <div class="status-pill" id="connection-pill">连接中</div>
           <div class="status-meta">
-            <span id="symbol-label">-</span>
             <span id="started-at">-</span>
           </div>
         </div>
@@ -25,39 +24,49 @@
 
       <section class="summary-grid">
         <article class="metric-card">
+          <span class="metric-label">活跃交易对</span>
+          <strong id="metric-symbols">0</strong>
+        </article>
+        <article class="metric-card">
           <span class="metric-label">告警次数</span>
           <strong id="metric-opportunities">0</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">飞书推送</span>
+          <strong id="metric-lark">空闲</strong>
         </article>
         <article class="metric-card">
           <span class="metric-label">在线连接</span>
           <strong id="metric-subscribers">0</strong>
         </article>
-        <article class="metric-card">
-          <span class="metric-label">飞书推送</span>
-          <strong id="metric-lark">Idle</strong>
-        </article>
-        <article class="metric-card">
-          <span class="metric-label">净价差阈值</span>
-          <strong id="metric-threshold">-</strong>
-        </article>
       </section>
 
-      <section class="panel-grid">
-        <article class="panel">
-          <div class="panel-heading">
-            <h2>实时盘口</h2>
-            <span class="panel-tag">顶级报价</span>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>价差排行</h2>
+          <div class="market-tabs" id="market-tabs">
+            <button class="tab-btn active" data-market="all">全部</button>
           </div>
-          <div class="quote-grid" id="quotes"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-heading">
-            <h2>当前价差</h2>
-            <span class="panel-tag">扣除手续费</span>
-          </div>
-          <div class="spread-grid" id="spreads"></div>
-        </article>
+        </div>
+        <div class="spread-table-wrapper">
+          <table class="spread-table" id="spread-table">
+            <thead>
+              <tr>
+                <th>交易对</th>
+                <th>市场</th>
+                <th>方向</th>
+                <th>净价差 (bps)</th>
+                <th>毛价差 (USDT)</th>
+                <th>买价</th>
+                <th>卖价</th>
+                <th>可成交量</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="spread-body"></tbody>
+          </table>
+          <div class="empty-state" id="spread-empty" style="display:none">等待双边数据...</div>
+        </div>
       </section>
 
       <section class="panel">
@@ -68,59 +77,6 @@
         <div class="opportunity-list" id="opportunities"></div>
       </section>
     </div>
-
-    <template id="quote-template">
-      <article class="quote-card">
-        <div class="quote-head">
-          <h3></h3>
-          <span class="quote-time"></span>
-        </div>
-        <div class="quote-row">
-          <span>买一</span>
-          <strong class="quote-bid"></strong>
-          <span class="quote-size quote-bid-size"></span>
-        </div>
-        <div class="quote-row">
-          <span>卖一</span>
-          <strong class="quote-ask"></strong>
-          <span class="quote-size quote-ask-size"></span>
-        </div>
-      </article>
-    </template>
-
-    <template id="spread-template">
-      <article class="spread-card">
-        <div class="spread-head">
-          <h3></h3>
-          <span class="spread-badge"></span>
-        </div>
-        <div class="spread-line">
-          <span>净价差</span>
-          <strong class="spread-net"></strong>
-        </div>
-        <div class="spread-line">
-          <span>毛价差</span>
-          <strong class="spread-gross"></strong>
-        </div>
-        <div class="spread-line">
-          <span>可成交量</span>
-          <strong class="spread-size"></strong>
-        </div>
-      </article>
-    </template>
-
-    <template id="opportunity-template">
-      <article class="opportunity-card">
-        <div class="opportunity-head">
-          <div>
-            <h3></h3>
-            <p class="opportunity-time"></p>
-          </div>
-          <span class="opportunity-badge"></span>
-        </div>
-        <div class="opportunity-stats"></div>
-      </article>
-    </template>
 
     <script src="/static/app.js" defer></script>
   </body>

@@ -1,6 +1,7 @@
 from .monitor import (
     ArbitrageMonitor,
     BestQuote,
+    MultiArbitrageMonitor,
     Opportunity,
     parse_binance_book_ticker,
     parse_okx_books5,
@@ -9,6 +10,7 @@ from .monitor import (
 __all__ = [
     "ArbitrageMonitor",
     "BestQuote",
+    "MultiArbitrageMonitor",
     "Opportunity",
     "parse_binance_book_ticker",
     "parse_okx_books5",

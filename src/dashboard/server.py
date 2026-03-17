@@ -24,17 +24,18 @@ class DashboardStore:
     def __init__(
         self,
         *,
-        symbol: str,
+        market_types: list[str],
         binance_fee_bps: float,
         okx_fee_bps: float,
         min_net_bps: float,
         min_size: float,
         max_quote_age_seconds: float,
         lark_enabled: bool,
-        max_opportunities: int = 100,
+        max_opportunities: int = 500,
         quote_refresh_interval: float = 0.5,
+        top_spreads_limit: int = 50,
     ) -> None:
-        self.symbol = symbol
+        self.market_types = market_types
         self.binance_fee_bps = binance_fee_bps
         self.okx_fee_bps = okx_fee_bps
         self.min_net_bps = min_net_bps
@@ -44,7 +45,9 @@ class DashboardStore:
         self.started_at = _iso_now()
         self.total_opportunities = 0
         self.recent_opportunities: deque[dict[str, Any]] = deque(maxlen=max_opportunities)
-        self.latest_quotes: dict[str, dict[str, Any]] = {}
+        # quotes keyed by (canonical_symbol, exchange)
+        self.latest_quotes: dict[tuple[str, str], dict[str, Any]] = {}
+        self.active_symbols: set[str] = set()
         self.lark_status: dict[str, Any] = {
             "enabled": lark_enabled,
             "lastStatus": "idle" if lark_enabled else "disabled",
@@ -54,9 +57,11 @@ class DashboardStore:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._quote_refresh_interval = quote_refresh_interval
         self._last_snapshot_push = 0.0
+        self._top_spreads_limit = top_spreads_limit
 
     async def record_quote(self, quote: BestQuote) -> None:
-        self.latest_quotes[quote.exchange] = {
+        key = (quote.symbol, quote.exchange)
+        self.latest_quotes[key] = {
             "exchange": quote.exchange,
             "symbol": quote.symbol,
             "bidPrice": quote.bid_price,
@@ -66,6 +71,7 @@ class DashboardStore:
             "exchangeTsMs": quote.exchange_ts_ms,
             "updatedAt": _iso_now(),
         }
+        self.active_symbols.add(quote.symbol)
 
         now = time.monotonic()
         if now - self._last_snapshot_push >= self._quote_refresh_interval:
@@ -88,11 +94,12 @@ class DashboardStore:
 
     def snapshot(self) -> dict[str, Any]:
         return {
-            "symbol": self.symbol,
             "startedAt": self.started_at,
+            "marketTypes": self.market_types,
             "stats": {
                 "totalOpportunities": self.total_opportunities,
                 "subscriberCount": len(self._subscribers),
+                "activeSymbols": len(self.active_symbols),
             },
             "config": {
                 "binanceFeeBps": self.binance_fee_bps,
@@ -101,12 +108,87 @@ class DashboardStore:
                 "minSize": self.min_size,
                 "maxQuoteAgeSeconds": self.max_quote_age_seconds,
             },
-            "quotes": self.latest_quotes,
-            "currentSpreads": self._build_current_spreads(),
+            "topSpreads": self._build_top_spreads(),
             "recentOpportunities": list(self.recent_opportunities),
             "delivery": {
                 "lark": self.lark_status,
             },
+        }
+
+    def _build_top_spreads(self) -> list[dict[str, Any]]:
+        """Compute top spreads across all symbol pairs, sorted by abs net_bps desc."""
+        # Group quotes by canonical symbol
+        symbols_with_both: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+        for (symbol, exchange), quote in self.latest_quotes.items():
+            if symbol not in symbols_with_both:
+                symbols_with_both[symbol] = (None, None)  # type: ignore[assignment]
+            binance_q, okx_q = symbols_with_both[symbol]
+            if exchange == "binance":
+                symbols_with_both[symbol] = (quote, okx_q)
+            elif exchange == "okx":
+                symbols_with_both[symbol] = (binance_q, quote)
+
+        spreads: list[dict[str, Any]] = []
+        for symbol, (binance_q, okx_q) in symbols_with_both.items():
+            if binance_q is None or okx_q is None:
+                continue
+            market_type = self._infer_market_type(symbol)
+            for buy_q, sell_q, buy_fee, sell_fee in [
+                (binance_q, okx_q, self.binance_fee_bps, self.okx_fee_bps),
+                (okx_q, binance_q, self.okx_fee_bps, self.binance_fee_bps),
+            ]:
+                view = self._spread_view(
+                    symbol=symbol,
+                    market_type=market_type,
+                    buy_quote=buy_q,
+                    sell_quote=sell_q,
+                    buy_fee_bps=buy_fee,
+                    sell_fee_bps=sell_fee,
+                )
+                if view["netBps"] > 0:
+                    spreads.append(view)
+
+        spreads.sort(key=lambda s: s["netBps"], reverse=True)
+        return spreads[: self._top_spreads_limit]
+
+    @staticmethod
+    def _infer_market_type(symbol: str) -> str:
+        if symbol.endswith("-SWAP"):
+            if "-USDT-" in symbol:
+                return "usdt_perp"
+            return "coin_perp"
+        return "spot"
+
+    def _spread_view(
+        self,
+        *,
+        symbol: str,
+        market_type: str,
+        buy_quote: dict[str, Any],
+        sell_quote: dict[str, Any],
+        buy_fee_bps: float,
+        sell_fee_bps: float,
+    ) -> dict[str, Any]:
+        buy_price = float(buy_quote["askPrice"])
+        sell_price = float(sell_quote["bidPrice"])
+        executable_size = min(float(buy_quote["askSize"]), float(sell_quote["bidSize"]))
+        gross_spread = sell_price - buy_price
+        gross_bps = gross_spread / buy_price * 10_000 if buy_price > 0 else 0.0
+        fee_bps = buy_fee_bps + sell_fee_bps
+        net_bps = gross_bps - fee_bps
+        return {
+            "symbol": symbol,
+            "marketType": market_type,
+            "buyExchange": buy_quote["exchange"],
+            "sellExchange": sell_quote["exchange"],
+            "buyPrice": buy_price,
+            "sellPrice": sell_price,
+            "executableSize": executable_size,
+            "grossSpread": gross_spread,
+            "grossBps": gross_bps,
+            "netBps": net_bps,
+            "feeBps": fee_bps,
+            "meetsThreshold": executable_size >= self.min_size and net_bps >= self.min_net_bps,
         }
 
     async def broadcast_snapshot(self) -> None:
@@ -130,55 +212,6 @@ class DashboardStore:
 
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
-
-    def _build_current_spreads(self) -> list[dict[str, Any]]:
-        binance_quote = self.latest_quotes.get("binance")
-        okx_quote = self.latest_quotes.get("okx")
-        if binance_quote is None or okx_quote is None:
-            return []
-
-        return [
-            self._spread_view(
-                buy_quote=binance_quote,
-                sell_quote=okx_quote,
-                buy_fee_bps=self.binance_fee_bps,
-                sell_fee_bps=self.okx_fee_bps,
-            ),
-            self._spread_view(
-                buy_quote=okx_quote,
-                sell_quote=binance_quote,
-                buy_fee_bps=self.okx_fee_bps,
-                sell_fee_bps=self.binance_fee_bps,
-            ),
-        ]
-
-    def _spread_view(
-        self,
-        *,
-        buy_quote: dict[str, Any],
-        sell_quote: dict[str, Any],
-        buy_fee_bps: float,
-        sell_fee_bps: float,
-    ) -> dict[str, Any]:
-        buy_price = float(buy_quote["askPrice"])
-        sell_price = float(sell_quote["bidPrice"])
-        executable_size = min(float(buy_quote["askSize"]), float(sell_quote["bidSize"]))
-        gross_spread = sell_price - buy_price
-        gross_bps = gross_spread / buy_price * 10_000 if buy_price > 0 else 0.0
-        fee_bps = buy_fee_bps + sell_fee_bps
-        net_bps = gross_bps - fee_bps
-        return {
-            "buyExchange": buy_quote["exchange"],
-            "sellExchange": sell_quote["exchange"],
-            "buyPrice": buy_price,
-            "sellPrice": sell_price,
-            "executableSize": executable_size,
-            "grossSpread": gross_spread,
-            "grossBps": gross_bps,
-            "netBps": net_bps,
-            "feeBps": fee_bps,
-            "meetsThreshold": executable_size >= self.min_size and net_bps >= self.min_net_bps,
-        }
 
 
 async def handle_index(_: web.Request) -> web.FileResponse:

@@ -33,6 +33,7 @@ class BestQuote:
 class Opportunity:
     observed_at: str
     symbol: str
+    market_type: str
     buy_exchange: str
     sell_exchange: str
     buy_price: float
@@ -198,6 +199,7 @@ class ArbitrageMonitor:
         return Opportunity(
             observed_at=_iso_now(),
             symbol=self.symbol,
+            market_type="spot",
             buy_exchange=buy_quote.exchange,
             sell_exchange=sell_quote.exchange,
             buy_price=buy_quote.ask_price,
@@ -237,3 +239,144 @@ class ArbitrageMonitor:
         )
         with urllib.request.urlopen(request, timeout=10) as response:
             response.read()
+
+
+class MultiArbitrageMonitor:
+    def __init__(
+        self,
+        *,
+        binance_fee_bps: float = 0.0,
+        okx_fee_bps: float = 0.0,
+        min_net_bps: float = 0.0,
+        min_size: float = 0.0,
+        max_quote_age_seconds: float = 2.0,
+        alert_cooldown_seconds: float = 5.0,
+        opportunity_handler: OpportunityHandler | None = None,
+        pretty: bool = False,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self.binance_fee_bps = binance_fee_bps
+        self.okx_fee_bps = okx_fee_bps
+        self.min_net_bps = min_net_bps
+        self.min_size = min_size
+        self.max_quote_age_seconds = max_quote_age_seconds
+        self.alert_cooldown_seconds = alert_cooldown_seconds
+        self.opportunity_handler = opportunity_handler
+        self.pretty = pretty
+        self.logger = logger or logging.getLogger(__name__)
+        self._quotes: dict[tuple[str, str], BestQuote] = {}
+        self._last_alert_at: dict[tuple[str, str], float] = {}
+
+    async def update_quote(self, quote: BestQuote) -> None:
+        key = (quote.symbol, quote.exchange)
+        self._quotes[key] = quote
+
+        for opportunity in self._evaluate(quote.symbol):
+            alert_key = (quote.symbol, f"{opportunity.buy_exchange}->{opportunity.sell_exchange}")
+            now = time.monotonic()
+            last = self._last_alert_at.get(alert_key, 0.0)
+            if now - last < self.alert_cooldown_seconds:
+                continue
+
+            self._last_alert_at[alert_key] = now
+            print(opportunity.to_json(pretty=self.pretty))
+
+            if self.opportunity_handler is not None:
+                result = self.opportunity_handler(opportunity)
+                if inspect.isawaitable(result):
+                    await result
+
+    def _fresh_quote(self, symbol: str, exchange: str) -> BestQuote | None:
+        quote = self._quotes.get((symbol, exchange))
+        if quote is None:
+            return None
+        age = time.monotonic() - quote.received_at
+        if age > self.max_quote_age_seconds:
+            return None
+        return quote
+
+    def _evaluate(self, symbol: str) -> list[Opportunity]:
+        binance_q = self._fresh_quote(symbol, "binance")
+        okx_q = self._fresh_quote(symbol, "okx")
+        if binance_q is None or okx_q is None:
+            return []
+
+        market_type = self._infer_market_type(symbol)
+        results: list[Opportunity] = []
+
+        opp = self._build_opportunity(binance_q, okx_q, self.binance_fee_bps, self.okx_fee_bps, symbol, market_type)
+        if opp is not None:
+            results.append(opp)
+
+        opp = self._build_opportunity(okx_q, binance_q, self.okx_fee_bps, self.binance_fee_bps, symbol, market_type)
+        if opp is not None:
+            results.append(opp)
+
+        return results
+
+    @staticmethod
+    def _infer_market_type(symbol: str) -> str:
+        if symbol.endswith("-SWAP"):
+            if "-USDT-" in symbol:
+                return "usdt_perp"
+            return "coin_perp"
+        return "spot"
+
+    def _build_opportunity(
+        self,
+        buy_q: BestQuote,
+        sell_q: BestQuote,
+        buy_fee_bps: float,
+        sell_fee_bps: float,
+        symbol: str,
+        market_type: str,
+    ) -> Opportunity | None:
+        if buy_q.ask_price <= 0 or sell_q.bid_price <= 0:
+            return None
+
+        executable_size = min(buy_q.ask_size, sell_q.bid_size)
+        if executable_size < self.min_size:
+            return None
+
+        gross_spread = sell_q.bid_price - buy_q.ask_price
+        if gross_spread <= 0:
+            return None
+
+        gross_bps = gross_spread / buy_q.ask_price * 10_000
+        fee_bps = buy_fee_bps + sell_fee_bps
+        net_bps = gross_bps - fee_bps
+        if net_bps < self.min_net_bps:
+            return None
+
+        return Opportunity(
+            observed_at=_iso_now(),
+            symbol=symbol,
+            market_type=market_type,
+            buy_exchange=buy_q.exchange,
+            sell_exchange=sell_q.exchange,
+            buy_price=buy_q.ask_price,
+            sell_price=sell_q.bid_price,
+            executable_size=executable_size,
+            gross_spread=gross_spread,
+            gross_bps=gross_bps,
+            net_bps=net_bps,
+            fee_bps=fee_bps,
+            quotes={
+                buy_q.exchange: {
+                    "symbol": buy_q.symbol,
+                    "bidPrice": buy_q.bid_price,
+                    "bidSize": buy_q.bid_size,
+                    "askPrice": buy_q.ask_price,
+                    "askSize": buy_q.ask_size,
+                    "exchangeTsMs": buy_q.exchange_ts_ms,
+                },
+                sell_q.exchange: {
+                    "symbol": sell_q.symbol,
+                    "bidPrice": sell_q.bid_price,
+                    "bidSize": sell_q.bid_size,
+                    "askPrice": sell_q.ask_price,
+                    "askSize": sell_q.ask_size,
+                    "exchangeTsMs": sell_q.exchange_ts_ms,
+                },
+            },
+        )
