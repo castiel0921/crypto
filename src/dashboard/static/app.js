@@ -107,12 +107,12 @@ function renderSpreads(spreads) {
       <td><strong>${s.symbol}</strong></td>
       <td>${MARKET_LABELS[s.marketType] || s.marketType}</td>
       <td>买入 ${s.buyExchange.toUpperCase()} / 卖出 ${s.sellExchange.toUpperCase()}</td>
-      <td class="${s.netBps >= 0 ? "positive" : "negative"}">${formatCompact(s.netBps, 3)}</td>
-      <td>${formatNumber(s.grossSpread, 2)}</td>
-      <td>${formatNumber(s.buyPrice, 2)}</td>
-      <td>${formatNumber(s.sellPrice, 2)}</td>
-      <td>${formatCompact(s.executableSize, 6)} ${base}</td>
-      <td>${formatNumber(s.notional, 2)}</td>
+      <td class="${s.netBps >= 0 ? "positive" : "negative"}">${s.netBps}</td>
+      <td>${s.grossSpread}</td>
+      <td>${s.buyPrice}</td>
+      <td>${s.sellPrice}</td>
+      <td>${s.executableSize} ${base}</td>
+      <td>${s.notional}</td>
     `;
     elements.spreadBody.appendChild(tr);
   });
