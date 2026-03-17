@@ -153,6 +153,13 @@ h1 {
   position: relative;
 }
 
+.chart-title {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
 .panel-heading,
 .quote-head,
 .spread-head,

@@ -32,12 +32,14 @@ const elements = {
   oiBody: document.getElementById("oi-body"),
   oiEmpty: document.getElementById("oi-empty"),
   oiChart: document.getElementById("oi-chart"),
+  oiDailyChart: document.getElementById("oi-daily-chart"),
   opportunities: document.getElementById("opportunities"),
 };
 
 let currentMarketFilter = "all";
 let latestState = null;
 let oiChartInstance = null;
+let oiDailyChartInstance = null;
 
 const CHART_COLORS = [
   "#5eb0ff", "#2dd4a3", "#ff6b7a", "#ffd666", "#b388ff",
@@ -153,6 +155,7 @@ function renderOpenInterest(data) {
   });
 
   renderOIChart(filtered);
+  renderOIDailyChart(filtered);
 }
 
 function renderOIChart(data) {
@@ -207,6 +210,73 @@ function renderOIChart(data) {
           type: "time",
           time: { unit: "minute", displayFormats: { minute: "HH:mm" } },
           ticks: { color: "#64748b", maxTicksLimit: 12 },
+          grid: { color: "rgba(100,116,139,0.15)" },
+        },
+        y: {
+          ticks: {
+            color: "#64748b",
+            callback: (v) => formatUSD(v),
+          },
+          grid: { color: "rgba(100,116,139,0.15)" },
+        },
+      },
+    },
+  });
+}
+
+function renderOIDailyChart(data) {
+  const withDaily = (data || []).filter((d) => d.dailyHistory && d.dailyHistory.length >= 2);
+  if (!withDaily.length) return;
+
+  const datasets = withDaily.map((item, i) => {
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    return {
+      label: item.symbol.replace("-USDT-SWAP", "").replace("-USD-SWAP", ""),
+      data: item.dailyHistory.map((h) => ({ x: h.t, y: h.v })),
+      borderColor: color,
+      backgroundColor: color + "20",
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      hidden: i >= 5,
+    };
+  });
+
+  if (oiDailyChartInstance) {
+    oiDailyChartInstance.data.datasets = datasets;
+    oiDailyChartInstance.update("none");
+    return;
+  }
+
+  oiDailyChartInstance = new Chart(elements.oiDailyChart, {
+    type: "line",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "top",
+          labels: {
+            color: "#94a3b8",
+            font: { size: 11 },
+            boxWidth: 12,
+            padding: 8,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${formatUSD(ctx.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: "time",
+          time: { unit: "day", displayFormats: { day: "MM-dd" } },
+          ticks: { color: "#64748b", maxTicksLimit: 15 },
           grid: { color: "rgba(100,116,139,0.15)" },
         },
         y: {

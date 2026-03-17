@@ -69,9 +69,11 @@ class DashboardStore:
         self._price_movers_limit = 20
         # Open interest data
         self._open_interest: list[dict[str, Any]] = []
-        # OI history: symbol -> list of (iso_timestamp, total_oi_usdt)
+        # OI intraday history: symbol -> list of (iso_timestamp, total_oi_usdt)
         self._oi_history: dict[str, list[tuple[str, float]]] = {}
         self._oi_history_max = 1440  # 24h at 1-min intervals
+        # OI 30-day daily history from Binance: symbol -> [{t, v}, ...]
+        self._oi_daily_history: dict[str, list[dict[str, Any]]] = {}
 
     async def record_quote(self, quote: BestQuote) -> None:
         key = (quote.symbol, quote.exchange)
@@ -246,7 +248,15 @@ class DashboardStore:
                 {"t": t, "v": v}
                 for t, v in self._oi_history.get(item["symbol"], [])
             ]
+            item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])
         self._open_interest = data
+        await self.broadcast_snapshot()
+
+    async def update_oi_daily_history(self, history: dict[str, list[dict[str, Any]]]) -> None:
+        self._oi_daily_history = history
+        # Re-attach to current OI data
+        for item in self._open_interest:
+            item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])
         await self.broadcast_snapshot()
 
     def _build_price_movers(self) -> list[dict[str, Any]]:

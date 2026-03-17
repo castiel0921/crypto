@@ -147,6 +147,77 @@ async def poll_open_interest(
         await asyncio.sleep(interval)
 
 
+async def poll_oi_daily_history(
+    store: DashboardStore,
+    market_types: list[MarketType],
+    all_pairs: dict[MarketType, list[str]],
+    interval: float = 3600.0,
+    top_n: int = 20,
+) -> None:
+    """Fetch 30-day daily OI history from Binance for top symbols."""
+    poll_logger = logging.getLogger("oi_history")
+
+    perp_types = [mt for mt in market_types if mt != MarketType.SPOT]
+    if not perp_types:
+        return
+
+    # Wait for real-time OI to populate first
+    await asyncio.sleep(90)
+
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Get current top symbols from store
+                current_oi = store._open_interest
+                top_symbols = [item["symbol"] for item in current_oi[:top_n]]
+
+                history: dict[str, list[dict]] = {}  # symbol -> [{t, v}, ...]
+
+                for symbol in top_symbols:
+                    base = base_from_okx_symbol(symbol)
+                    if symbol.endswith("-USDT-SWAP"):
+                        mt = MarketType.USDT_PERP
+                    elif symbol.endswith("-USD-SWAP"):
+                        mt = MarketType.COIN_PERP
+                    else:
+                        continue
+
+                    bn_sym = binance_symbol(base, mt)
+                    bn_base_url = binance_rest_base_url(mt)
+                    if mt == MarketType.USDT_PERP:
+                        hist_path = "/futures/data/openInterestHist"
+                    else:
+                        hist_path = "/futures/data/openInterestHist"
+
+                    try:
+                        data = await _fetch_json(
+                            session,
+                            f"{bn_base_url}{hist_path}",
+                            symbol=bn_sym,
+                            period="1d",
+                            limit="30",
+                        )
+                        points = []
+                        for item in data:
+                            ts = int(item.get("timestamp", 0))
+                            val = float(item.get("sumOpenInterestValue", 0))
+                            iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts / 1000))
+                            points.append({"t": iso, "v": val})
+                        history[symbol] = points
+                    except Exception as exc:
+                        poll_logger.debug("Binance OI history for %s failed: %s", bn_sym, exc)
+
+                    await asyncio.sleep(0.2)
+
+                await store.update_oi_daily_history(history)
+                poll_logger.info("OI daily history updated: %d symbols", len(history))
+
+        except Exception as exc:
+            poll_logger.warning("OI daily history poll failed: %s", exc)
+
+        await asyncio.sleep(interval)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Multi-symbol, multi-market cross-exchange arbitrage monitor",
@@ -400,6 +471,9 @@ async def async_main() -> None:
     if dashboard_store is not None:
         ws_tasks.append(asyncio.create_task(
             poll_open_interest(dashboard_store, market_types, all_pairs)
+        ))
+        ws_tasks.append(asyncio.create_task(
+            poll_oi_daily_history(dashboard_store, market_types, all_pairs)
         ))
 
     try:
