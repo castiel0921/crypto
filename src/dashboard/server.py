@@ -12,6 +12,7 @@ from typing import Any
 from aiohttp import web
 
 from arbitrage import BestQuote, Opportunity
+from dashboard.oi_db import OIDailyDB
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 _CACHE_BUST = str(int(time.time()))
@@ -37,6 +38,7 @@ class DashboardStore:
         max_opportunities: int = 500,
         quote_refresh_interval: float = 0.5,
         top_spreads_limit: int = 50,
+        oi_db: OIDailyDB | None = None,
     ) -> None:
         self.market_types = market_types
         self.binance_fee_bps = binance_fee_bps
@@ -69,8 +71,11 @@ class DashboardStore:
         self._price_movers_limit = 20
         # Open interest data
         self._open_interest: list[dict[str, Any]] = []
-        # OI 30-day daily history from Binance: symbol -> [{t, v}, ...]
-        self._oi_daily_history: dict[str, list[dict[str, Any]]] = {}
+        self._oi_db = oi_db
+        # OI daily history: symbol -> [{t, v}, ...] — pre-load from DB if available
+        self._oi_daily_history: dict[str, list[dict[str, Any]]] = (
+            oi_db.get_history() if oi_db is not None else {}
+        )
 
     async def record_quote(self, quote: BestQuote) -> None:
         key = (quote.symbol, quote.exchange)
@@ -229,13 +234,23 @@ class DashboardStore:
         }
 
     async def update_open_interest(self, data: list[dict[str, Any]]) -> None:
+        # Persist today's combined OI snapshot to DB
+        if self._oi_db is not None:
+            self._oi_db.upsert_realtime_snapshot(data)
+            self._oi_daily_history = self._oi_db.get_history()
+
         for item in data:
             item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])
         self._open_interest = data
         await self.broadcast_snapshot()
 
     async def update_oi_daily_history(self, history: dict[str, list[dict[str, Any]]]) -> None:
-        self._oi_daily_history = history
+        if self._oi_db is not None:
+            for symbol, points in history.items():
+                self._oi_db.upsert_binance_history(symbol, points)
+            self._oi_daily_history = self._oi_db.get_history()
+        else:
+            self._oi_daily_history = history
         # Re-attach to current OI data
         for item in self._open_interest:
             item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])

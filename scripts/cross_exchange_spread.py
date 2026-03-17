@@ -18,7 +18,7 @@ import aiohttp  # noqa: E402
 
 from arbitrage import BestQuote, MultiArbitrageMonitor, parse_binance_book_ticker, parse_okx_books5  # noqa: E402
 from binance_ws import BinanceMultiStreamClient  # noqa: E402
-from dashboard import DashboardStore, start_dashboard_server  # noqa: E402
+from dashboard import DashboardStore, OIDailyDB, start_dashboard_server  # noqa: E402
 from discovery import (  # noqa: E402
     MarketType,
     base_from_okx_symbol,
@@ -150,7 +150,7 @@ async def poll_oi_daily_history(
     interval: float = 3600.0,
     top_n: int = 20,
 ) -> None:
-    """Fetch 30-day daily OI history from Binance for top symbols."""
+    """Fetch daily OI history from Binance for top symbols, persisted to SQLite."""
     poll_logger = logging.getLogger("oi_history")
 
     perp_types = [mt for mt in market_types if mt != MarketType.SPOT]
@@ -160,14 +160,14 @@ async def poll_oi_daily_history(
     # Wait for real-time OI to populate first
     await asyncio.sleep(70)
 
+    first_run = True
     while True:
         try:
             async with aiohttp.ClientSession(trust_env=True) as session:
-                # Get current top symbols from store
                 current_oi = store._open_interest
                 top_symbols = [item["symbol"] for item in current_oi[:top_n]]
 
-                history: dict[str, list[dict]] = {}  # symbol -> [{t, v}, ...]
+                history: dict[str, list[dict]] = {}
 
                 for symbol in top_symbols:
                     base = base_from_okx_symbol(symbol)
@@ -178,12 +178,21 @@ async def poll_oi_daily_history(
                     else:
                         continue
 
+                    # Incremental fetch: on first run fetch full 30 days,
+                    # on subsequent runs only fetch missing days
+                    limit = 30
+                    if not first_run and store._oi_db is not None:
+                        latest = store._oi_db.get_latest_date(symbol)
+                        if latest is not None:
+                            from datetime import date as _date
+                            gap = (_date.today() - _date.fromisoformat(latest)).days
+                            if gap <= 0:
+                                continue  # already up to date
+                            limit = min(gap + 1, 30)
+
                     bn_sym = binance_symbol(base, mt)
                     bn_base_url = binance_rest_base_url(mt)
-                    if mt == MarketType.USDT_PERP:
-                        hist_path = "/futures/data/openInterestHist"
-                    else:
-                        hist_path = "/futures/data/openInterestHist"
+                    hist_path = "/futures/data/openInterestHist"
 
                     try:
                         data = await _fetch_json(
@@ -191,7 +200,7 @@ async def poll_oi_daily_history(
                             f"{bn_base_url}{hist_path}",
                             symbol=bn_sym,
                             period="1d",
-                            limit="30",
+                            limit=str(limit),
                         )
                         if isinstance(data, list):
                             points = []
@@ -202,7 +211,7 @@ async def poll_oi_daily_history(
                                 points.append({"t": iso, "v": val})
                             history[symbol] = points
                         else:
-                            poll_logger.warning("Binance OI history for %s unexpected response: %s", bn_sym, str(data)[:200])
+                            poll_logger.warning("Binance OI history for %s unexpected: %s", bn_sym, str(data)[:200])
                     except Exception as exc:
                         poll_logger.warning("Binance OI history for %s failed: %s", bn_sym, exc)
 
@@ -210,6 +219,7 @@ async def poll_oi_daily_history(
 
                 await store.update_oi_daily_history(history)
                 poll_logger.info("OI daily history updated: %d symbols", len(history))
+                first_run = False
 
         except Exception as exc:
             poll_logger.warning("OI daily history poll failed: %s", exc)
@@ -354,7 +364,12 @@ async def async_main() -> None:
     # Dashboard store
     dashboard_store = None
     dashboard_runner = None
+    oi_db = None
     if not args.disable_dashboard:
+        db_path = PROJECT_ROOT / "data" / "oi_daily.db"
+        oi_db = OIDailyDB(db_path)
+        logger.info("OI database opened at %s", db_path)
+
         dashboard_store = DashboardStore(
             market_types=[mt.value for mt in market_types],
             binance_fee_bps=args.binance_fee_bps,
@@ -364,6 +379,7 @@ async def async_main() -> None:
             min_notional=args.min_notional,
             max_quote_age_seconds=args.max_quote_age,
             lark_enabled=bool(args.lark_webhook_url),
+            oi_db=oi_db,
         )
         dashboard_runner = await start_dashboard_server(
             dashboard_store,
@@ -480,6 +496,8 @@ async def async_main() -> None:
     finally:
         if dashboard_runner is not None:
             await dashboard_runner.cleanup()
+        if oi_db is not None:
+            oi_db.close()
 
 
 def main() -> None:
