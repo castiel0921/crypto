@@ -354,14 +354,25 @@ function renderFundingRates(data) {
 
     const spreadCls = spread === null ? "" : Math.abs(spread) > 0.0005 ? "arb-spread" : "";
 
+    // Arbitrage direction: if spread > 0 → short Binance + long OKX; else long Binance + short OKX
+    let dirHtml = "-";
+    if (spread !== null && Math.abs(spread) > 0.00001) {
+      if (spread > 0) {
+        dirHtml = '<span class="arb-dir">空BN · 多OKX</span>';
+      } else {
+        dirHtml = '<span class="arb-dir">多BN · 空OKX</span>';
+      }
+    }
+
     const tr = document.createElement("tr");
     if (rowCls) tr.classList.add(rowCls);
     tr.innerHTML = `
       <td><strong>${item.symbol}</strong></td>
       <td class="${bnCls}">${fmtRate(bnRate)}</td>
       <td class="${okxCls}">${fmtRate(okxRate)}</td>
-      <td class="${spreadCls}">${spread !== null ? fmtRate(spread) : "-"}</td>
+      <td class="${spreadCls}">${spread !== null ? fmtRate(Math.abs(spread)) : "-"}</td>
       <td class="${spreadCls}">${annual !== null ? (annual * 100).toFixed(1) + "%" : "-"}</td>
+      <td>${dirHtml}</td>
       <td>${nextStr}</td>
     `;
     elements.fundingBody.appendChild(tr);

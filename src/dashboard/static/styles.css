@@ -355,6 +355,12 @@ h1 {
 .negative-rate { color: #34d399; }   /* negative = shorts pay = bullish signal */
 .arb-spread { color: #ffd666; font-weight: 600; }
 tr.arb-highlight { background: rgba(255, 214, 102, 0.06); }
+.arb-dir {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffd666;
+  letter-spacing: 0.02em;
+}
 
 @media (max-width: 920px) {
   .hero,
