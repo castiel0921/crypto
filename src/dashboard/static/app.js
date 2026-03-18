@@ -34,6 +34,7 @@ const elements = {
   oiDailyChart: document.getElementById("oi-daily-chart"),
   oiExchangeTabs: document.getElementById("oi-exchange-tabs"),
   etfBtcChart: document.getElementById("etf-btc-chart"),
+  etfEthChart: document.getElementById("etf-eth-chart"),
   opportunities: document.getElementById("opportunities"),
 };
 
@@ -41,7 +42,8 @@ let currentMarketFilter = "all";
 let latestState = null;
 let oiDailyChartInstance = null;
 let oiExchangeFilter = "all";
-let etfBtcChartInstance = null;
+const etfBtcHolder = { chart: null };
+const etfEthHolder = { chart: null };
 
 const CHART_COLORS = [
   "#5eb0ff", "#2dd4a3", "#ff6b7a", "#ffd666", "#b388ff",
@@ -248,7 +250,7 @@ function renderOIDailyChart(data) {
   });
 }
 
-function renderETFChart(records) {
+function renderETFChart(records, canvasEl, holder) {
   if (!records || !records.length) return;
 
   const labels = records.map((r) => r.date);
@@ -265,14 +267,14 @@ function renderETFChart(records) {
     borderSkipped: false,
   };
 
-  if (etfBtcChartInstance) {
-    etfBtcChartInstance.data.labels = labels;
-    etfBtcChartInstance.data.datasets = [dataset];
-    etfBtcChartInstance.update("none");
+  if (holder.chart) {
+    holder.chart.data.labels = labels;
+    holder.chart.data.datasets = [dataset];
+    holder.chart.update("none");
     return;
   }
 
-  etfBtcChartInstance = new Chart(elements.etfBtcChart, {
+  holder.chart = new Chart(canvasEl, {
     type: "bar",
     data: { labels, datasets: [dataset] },
     options: {
@@ -426,7 +428,8 @@ function renderState(state) {
 
   renderMarketTabs(state.marketTypes);
   renderOpenInterest(state.openInterest);
-  renderETFChart(state.etfHistory?.["us-btc-spot"]);
+  renderETFChart(state.etfHistory?.["us-btc-spot"], elements.etfBtcChart, etfBtcHolder);
+  renderETFChart(state.etfHistory?.["us-eth-spot"], elements.etfEthChart, etfEthHolder);
   renderMovers(state.priceMovers);
   renderSpreads(state.topSpreads);
   renderOpportunities(state.recentOpportunities);
