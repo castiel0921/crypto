@@ -96,21 +96,21 @@ class OIDailyDB:
     def get_history(
         self, symbols: list[str] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
-        """Return daily OI grouped by symbol: {symbol: [{t, v}, ...]}."""
+        """Return daily OI grouped by symbol: {symbol: [{t, v, bn, okx}, ...]}."""
         if symbols:
             placeholders = ",".join("?" for _ in symbols)
-            sql = f"SELECT symbol, date, total_oi FROM oi_daily WHERE symbol IN ({placeholders}) ORDER BY date"
+            sql = f"SELECT symbol, date, total_oi, binance_oi, okx_oi FROM oi_daily WHERE symbol IN ({placeholders}) ORDER BY date"
             rows = self._conn.execute(sql, symbols).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT symbol, date, total_oi FROM oi_daily ORDER BY date"
+                "SELECT symbol, date, total_oi, binance_oi, okx_oi FROM oi_daily ORDER BY date"
             ).fetchall()
 
         result: dict[str, list[dict[str, Any]]] = {}
-        for symbol, date, total_oi in rows:
+        for symbol, date, total_oi, binance_oi, okx_oi in rows:
             if symbol not in result:
                 result[symbol] = []
-            result[symbol].append({"t": date, "v": total_oi})
+            result[symbol].append({"t": date, "v": total_oi, "bn": binance_oi, "okx": okx_oi})
         return result
 
     def get_latest_date(self, symbol: str) -> str | None:

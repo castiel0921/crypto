@@ -32,6 +32,7 @@ const elements = {
   oiBody: document.getElementById("oi-body"),
   oiEmpty: document.getElementById("oi-empty"),
   oiDailyChart: document.getElementById("oi-daily-chart"),
+  oiExchangeTabs: document.getElementById("oi-exchange-tabs"),
   etfBtcChart: document.getElementById("etf-btc-chart"),
   opportunities: document.getElementById("opportunities"),
 };
@@ -39,6 +40,7 @@ const elements = {
 let currentMarketFilter = "all";
 let latestState = null;
 let oiDailyChartInstance = null;
+let oiExchangeFilter = "all";
 let etfBtcChartInstance = null;
 
 const CHART_COLORS = [
@@ -172,13 +174,15 @@ function renderOIDailyChart(data) {
   });
   const labels = Array.from(allDatesSet).sort();
 
+  const valueKey = oiExchangeFilter === "binance" ? "bn" : oiExchangeFilter === "okx" ? "okx" : "v";
+
   const datasets = withDaily.map((item, i) => {
     const color = CHART_COLORS[i % CHART_COLORS.length];
     // Build a map of date -> value for this symbol
     const dateMap = {};
     item.dailyHistory.forEach((h) => {
       const d = typeof h.t === "string" ? h.t.slice(0, 10) : new Date(h.t).toISOString().slice(0, 10);
-      dateMap[d] = h.v;
+      dateMap[d] = h[valueKey] !== undefined ? h[valueKey] : h.v;
     });
     return {
       label: item.symbol.replace("-USDT-SWAP", "").replace("-USD-SWAP", ""),
@@ -438,6 +442,16 @@ function setConnectionStatus(status, detail = "") {
     elements.connection.classList.add("error");
   }
 }
+
+// OI exchange filter tabs
+elements.oiExchangeTabs.querySelectorAll("[data-exchange]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    elements.oiExchangeTabs.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    oiExchangeFilter = btn.dataset.exchange;
+    renderOpenInterest(latestState?.openInterest);
+  });
+});
 
 async function bootstrap() {
   try {

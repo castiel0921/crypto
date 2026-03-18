@@ -64,7 +64,14 @@
           <div class="empty-state" id="oi-empty">等待持仓数据...</div>
         </div>
         <div class="oi-chart-wrapper">
-          <h3 class="chart-title">合约持仓历史</h3>
+          <div class="chart-heading">
+            <h3 class="chart-title">合约持仓历史</h3>
+            <div class="exchange-tabs" id="oi-exchange-tabs">
+              <button class="tab-btn small active" data-exchange="all">全部</button>
+              <button class="tab-btn small" data-exchange="binance">Binance</button>
+              <button class="tab-btn small" data-exchange="okx">OKX</button>
+            </div>
+          </div>
           <canvas id="oi-daily-chart"></canvas>
         </div>
       </section>

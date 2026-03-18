@@ -153,6 +153,23 @@ h1 {
   position: relative;
 }
 
+.chart-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.exchange-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tab-btn.small {
+  padding: 3px 12px;
+  font-size: 0.75rem;
+}
+
 .chart-title {
   color: var(--muted);
   font-size: 14px;
