@@ -12,6 +12,7 @@ from typing import Any
 from aiohttp import web
 
 from arbitrage import BestQuote, Opportunity
+from dashboard.etf_db import ETFDailyDB
 from dashboard.oi_db import OIDailyDB
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -39,6 +40,7 @@ class DashboardStore:
         quote_refresh_interval: float = 0.5,
         top_spreads_limit: int = 50,
         oi_db: OIDailyDB | None = None,
+        etf_db: ETFDailyDB | None = None,
     ) -> None:
         self.market_types = market_types
         self.binance_fee_bps = binance_fee_bps
@@ -76,6 +78,14 @@ class DashboardStore:
         self._oi_daily_history: dict[str, list[dict[str, Any]]] = (
             oi_db.get_history() if oi_db is not None else {}
         )
+        # ETF data
+        self._etf_db = etf_db
+        self._etf_history: dict[str, list[dict[str, Any]]] = {}
+        if etf_db is not None:
+            for t in ("us-btc-spot", "us-eth-spot"):
+                h = etf_db.get_history(t)
+                if h:
+                    self._etf_history[t] = h
 
     async def record_quote(self, quote: BestQuote) -> None:
         key = (quote.symbol, quote.exchange)
@@ -146,6 +156,7 @@ class DashboardStore:
             "topSpreads": self._build_top_spreads(),
             "priceMovers": self._build_price_movers(),
             "recentOpportunities": list(self.recent_opportunities),
+            "etfHistory": self._etf_history,
             "delivery": {
                 "lark": self.lark_status,
             },
@@ -256,6 +267,14 @@ class DashboardStore:
             item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])
         await self.broadcast_snapshot()
 
+    async def update_etf_history(self, etf_type: str, records: list[dict[str, Any]]) -> None:
+        if self._etf_db is not None and records:
+            self._etf_db.upsert_history(etf_type, records)
+            self._etf_history[etf_type] = self._etf_db.get_history(etf_type)
+        elif records:
+            self._etf_history[etf_type] = records
+        await self.broadcast_snapshot()
+
     def _build_price_movers(self) -> list[dict[str, Any]]:
         """Compute top price movers over the 5-minute window."""
         now = time.monotonic()
@@ -351,30 +370,6 @@ async def handle_sse(request: web.Request) -> web.StreamResponse:
     return response
 
 
-async def handle_debug_oi(request: web.Request) -> web.Response:
-    """Diagnostic: test Binance OI history API from this server."""
-    import aiohttp as _aiohttp
-
-    store: DashboardStore = request.app["store"]
-    symbol = request.query.get("symbol", "BTCUSDT")
-    url = f"https://fapi.binance.com/futures/data/openInterestHist"
-    result: dict[str, Any] = {
-        "url": url,
-        "params": {"symbol": symbol, "period": "1d", "limit": "3"},
-        "oi_count": len(store._open_interest),
-        "daily_history_symbols": len(store._oi_daily_history),
-    }
-    try:
-        async with _aiohttp.ClientSession(trust_env=True) as sess:
-            async with sess.get(url, params=result["params"], timeout=_aiohttp.ClientTimeout(total=10)) as resp:
-                result["status"] = resp.status
-                body = await resp.json()
-                result["response"] = body if isinstance(body, list) else body
-    except Exception as exc:
-        result["error"] = f"{type(exc).__name__}: {exc}"
-    return web.json_response(result)
-
-
 @web.middleware
 async def no_cache_middleware(request: web.Request, handler):
     response = await handler(request)
@@ -388,7 +383,6 @@ def create_dashboard_app(store: DashboardStore) -> web.Application:
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/state", handle_state)
     app.router.add_get("/api/events", handle_sse)
-    app.router.add_get("/api/debug/oi", handle_debug_oi)
     app.router.add_static("/static", STATIC_DIR)
     return app
 

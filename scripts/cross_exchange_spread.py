@@ -18,7 +18,7 @@ import aiohttp  # noqa: E402
 
 from arbitrage import BestQuote, MultiArbitrageMonitor, parse_binance_book_ticker, parse_okx_books5  # noqa: E402
 from binance_ws import BinanceMultiStreamClient  # noqa: E402
-from dashboard import DashboardStore, OIDailyDB, start_dashboard_server  # noqa: E402
+from dashboard import DashboardStore, ETFDailyDB, OIDailyDB, start_dashboard_server  # noqa: E402
 from discovery import (  # noqa: E402
     MarketType,
     base_from_okx_symbol,
@@ -32,6 +32,7 @@ from notifications import LarkNotifier  # noqa: E402
 from okx_ws import OKXMultiSubClient, Subscription  # noqa: E402
 
 _OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
+_SOSOVALUE_ETF_URL = "https://api.sosovalue.xyz/openapi/v2/etf/historicalInflowChart"
 
 
 async def _fetch_json(session: aiohttp.ClientSession, url: str, **params: str) -> dict:
@@ -227,6 +228,52 @@ async def poll_oi_daily_history(
         await asyncio.sleep(interval)
 
 
+async def poll_etf_history(
+    store: DashboardStore,
+    api_key: str,
+    interval: float = 3600.0,
+) -> None:
+    """Fetch ETF daily inflow data from SoSoValue, persisted to SQLite."""
+    poll_logger = logging.getLogger("etf_history")
+    etf_types = ["us-btc-spot", "us-eth-spot"]
+
+    # Small delay to not compete with OI init
+    await asyncio.sleep(10)
+
+    while True:
+        try:
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                for etf_type in etf_types:
+                    try:
+                        async with session.post(
+                            _SOSOVALUE_ETF_URL,
+                            json={"type": etf_type},
+                            headers={
+                                "x-soso-api-key": api_key,
+                                "Content-Type": "application/json",
+                            },
+                            timeout=aiohttp.ClientTimeout(total=15),
+                        ) as resp:
+                            resp.raise_for_status()
+                            body = await resp.json()
+                            records = body.get("data", [])
+                            if records:
+                                await store.update_etf_history(etf_type, records)
+                                poll_logger.info(
+                                    "ETF %s updated: %d records, latest %s",
+                                    etf_type, len(records), records[0].get("date"),
+                                )
+                    except Exception as exc:
+                        poll_logger.warning("ETF %s fetch failed: %s", etf_type, exc)
+
+                    await asyncio.sleep(1)
+
+        except Exception as exc:
+            poll_logger.warning("ETF poll cycle failed: %s", exc)
+
+        await asyncio.sleep(interval)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Multi-symbol, multi-market cross-exchange arbitrage monitor",
@@ -283,6 +330,11 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=5.0,
         help="Minimum seconds between alerts for the same direction",
+    )
+    parser.add_argument(
+        "--sosovalue-api-key",
+        default=os.environ.get("SOSOVALUE_API_KEY", ""),
+        help="SoSoValue API key for ETF data",
     )
     parser.add_argument(
         "--lark-webhook-url",
@@ -365,10 +417,13 @@ async def async_main() -> None:
     dashboard_store = None
     dashboard_runner = None
     oi_db = None
+    etf_db = None
     if not args.disable_dashboard:
         db_path = PROJECT_ROOT / "data" / "oi_daily.db"
         oi_db = OIDailyDB(db_path)
-        logger.info("OI database opened at %s", db_path)
+        etf_db_path = PROJECT_ROOT / "data" / "etf_daily.db"
+        etf_db = ETFDailyDB(etf_db_path)
+        logger.info("Databases opened at %s", PROJECT_ROOT / "data")
 
         dashboard_store = DashboardStore(
             market_types=[mt.value for mt in market_types],
@@ -380,6 +435,7 @@ async def async_main() -> None:
             max_quote_age_seconds=args.max_quote_age,
             lark_enabled=bool(args.lark_webhook_url),
             oi_db=oi_db,
+            etf_db=etf_db,
         )
         dashboard_runner = await start_dashboard_server(
             dashboard_store,
@@ -490,6 +546,11 @@ async def async_main() -> None:
         ws_tasks.append(asyncio.create_task(
             poll_oi_daily_history(dashboard_store, market_types, all_pairs)
         ))
+        # ETF data polling
+        if args.sosovalue_api_key:
+            ws_tasks.append(asyncio.create_task(
+                poll_etf_history(dashboard_store, args.sosovalue_api_key)
+            ))
 
     try:
         await asyncio.gather(*ws_tasks)
@@ -498,6 +559,8 @@ async def async_main() -> None:
             await dashboard_runner.cleanup()
         if oi_db is not None:
             oi_db.close()
+        if etf_db is not None:
+            etf_db.close()
 
 
 def main() -> None:

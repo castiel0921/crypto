@@ -32,12 +32,14 @@ const elements = {
   oiBody: document.getElementById("oi-body"),
   oiEmpty: document.getElementById("oi-empty"),
   oiDailyChart: document.getElementById("oi-daily-chart"),
+  etfBtcChart: document.getElementById("etf-btc-chart"),
   opportunities: document.getElementById("opportunities"),
 };
 
 let currentMarketFilter = "all";
 let latestState = null;
 let oiDailyChartInstance = null;
+let etfBtcChartInstance = null;
 
 const CHART_COLORS = [
   "#5eb0ff", "#2dd4a3", "#ff6b7a", "#ffd666", "#b388ff",
@@ -242,6 +244,69 @@ function renderOIDailyChart(data) {
   });
 }
 
+function renderETFChart(records) {
+  if (!records || !records.length) return;
+
+  const labels = records.map((r) => r.date);
+  const values = records.map((r) => r.totalNetInflow);
+  const colors = values.map((v) => (v >= 0 ? "rgba(45,212,163,0.8)" : "rgba(255,107,122,0.8)"));
+  const borders = values.map((v) => (v >= 0 ? "#2dd4a3" : "#ff6b7a"));
+
+  const dataset = {
+    label: "Daily Net Inflow",
+    data: values,
+    backgroundColor: colors,
+    borderColor: borders,
+    borderWidth: 1,
+    borderSkipped: false,
+  };
+
+  if (etfBtcChartInstance) {
+    etfBtcChartInstance.data.labels = labels;
+    etfBtcChartInstance.data.datasets = [dataset];
+    etfBtcChartInstance.update("none");
+    return;
+  }
+
+  etfBtcChartInstance = new Chart(elements.etfBtcChart, {
+    type: "bar",
+    data: { labels, datasets: [dataset] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items[0]?.label || "",
+            label: (ctx) => {
+              const v = ctx.parsed.y;
+              const sign = v >= 0 ? "+" : "";
+              return `净流入: ${sign}${formatUSD(Math.abs(v))}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: "#64748b", maxTicksLimit: 15 },
+          grid: { color: "rgba(100,116,139,0.15)" },
+        },
+        y: {
+          ticks: {
+            color: "#64748b",
+            callback: (v) => {
+              const sign = v >= 0 ? "" : "-";
+              return sign + formatUSD(Math.abs(v));
+            },
+          },
+          grid: { color: "rgba(100,116,139,0.15)" },
+        },
+      },
+    },
+  });
+}
+
 function renderMovers(movers) {
   const filtered =
     currentMarketFilter === "all"
@@ -357,6 +422,7 @@ function renderState(state) {
 
   renderMarketTabs(state.marketTypes);
   renderOpenInterest(state.openInterest);
+  renderETFChart(state.etfHistory?.["us-btc-spot"]);
   renderMovers(state.priceMovers);
   renderSpreads(state.topSpreads);
   renderOpportunities(state.recentOpportunities);
