@@ -74,6 +74,25 @@ class OIDailyDB:
                     (row["symbol"], today, bn, okx, total, now),
                 )
 
+    def upsert_okx_history(self, symbol: str, points: list[dict[str, Any]]) -> None:
+        """Upsert OKX daily history. Preserves existing binance_oi values."""
+        now = _utc_now()
+        with self._conn:
+            for p in points:
+                date = _to_date(p["t"])
+                val = float(p["v"])
+                self._conn.execute(
+                    """
+                    INSERT INTO oi_daily (symbol, date, binance_oi, okx_oi, total_oi, updated_at)
+                    VALUES (?, ?, 0, ?, ?, ?)
+                    ON CONFLICT(symbol, date) DO UPDATE SET
+                        okx_oi     = excluded.okx_oi,
+                        total_oi   = oi_daily.binance_oi + excluded.okx_oi,
+                        updated_at = excluded.updated_at
+                    """,
+                    (symbol, date, val, val, now),
+                )
+
     def get_history(
         self, symbols: list[str] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:

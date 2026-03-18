@@ -32,6 +32,7 @@ from notifications import LarkNotifier  # noqa: E402
 from okx_ws import OKXMultiSubClient, Subscription  # noqa: E402
 
 _OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
+_OKX_OI_HISTORY_URL = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-volume"
 _SOSOVALUE_ETF_URL = "https://api.sosovalue.xyz/openapi/v2/etf/historicalInflowChart"
 
 
@@ -217,6 +218,41 @@ async def poll_oi_daily_history(
                         poll_logger.warning("Binance OI history for %s failed: %s", bn_sym, exc)
 
                     await asyncio.sleep(0.5)
+
+                # --- OKX 180-day history (first run only) ---
+                if first_run:
+                    seen_ccy: set[str] = set()
+                    for symbol in top_symbols:
+                        ccy = symbol.split("-")[0]  # BTC-USDT-SWAP -> BTC
+                        if ccy in seen_ccy:
+                            continue
+                        seen_ccy.add(ccy)
+                        # Map ccy to USDT-SWAP symbol for DB storage
+                        target_symbol = f"{ccy}-USDT-SWAP"
+                        try:
+                            resp = await _fetch_json(
+                                session,
+                                _OKX_OI_HISTORY_URL,
+                                ccy=ccy,
+                                period="1D",
+                            )
+                            data = resp.get("data", []) if isinstance(resp, dict) else resp
+                            if isinstance(data, list) and data:
+                                points = []
+                                for item in data:
+                                    ts = int(item[0]) // 1000
+                                    oi_usd = float(item[1])
+                                    iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+                                    points.append({"t": iso, "v": oi_usd})
+                                if store._oi_db is not None:
+                                    store._oi_db.upsert_okx_history(target_symbol, points)
+                                poll_logger.info(
+                                    "OKX OI history for %s: %d days backfilled",
+                                    ccy, len(points),
+                                )
+                        except Exception as exc:
+                            poll_logger.warning("OKX OI history for %s failed: %s", ccy, exc)
+                        await asyncio.sleep(0.5)
 
                 await store.update_oi_daily_history(history)
                 poll_logger.info("OI daily history updated: %d symbols", len(history))
