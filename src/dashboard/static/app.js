@@ -35,6 +35,8 @@ const elements = {
   oiExchangeTabs: document.getElementById("oi-exchange-tabs"),
   etfBtcChart: document.getElementById("etf-btc-chart"),
   etfEthChart: document.getElementById("etf-eth-chart"),
+  fundingBody: document.getElementById("funding-body"),
+  fundingEmpty: document.getElementById("funding-empty"),
   opportunities: document.getElementById("opportunities"),
 };
 
@@ -313,6 +315,59 @@ function renderETFChart(records, canvasEl, holder) {
   });
 }
 
+function fmtRate(rate) {
+  if (rate === null || rate === undefined) return "-";
+  const pct = rate * 100;
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(4)}%`;
+}
+
+function renderFundingRates(data) {
+  elements.fundingBody.innerHTML = "";
+  if (!data || !data.length) {
+    elements.fundingEmpty.style.display = "block";
+    return;
+  }
+  elements.fundingEmpty.style.display = "none";
+
+  data.forEach((item) => {
+    const bnRate = item.binanceRate;
+    const okxRate = item.okxRate;
+    const spread = item.spread;
+    const annual = item.annualizedSpread;
+    const nextMs = item.nextFundingMs;
+
+    const bnCls = bnRate === null ? "" : bnRate > 0 ? "positive-rate" : bnRate < 0 ? "negative-rate" : "";
+    const okxCls = okxRate === null ? "" : okxRate > 0 ? "positive-rate" : okxRate < 0 ? "negative-rate" : "";
+
+    // Highlight row if annualized spread > 20%
+    const rowCls = annual !== null && annual > 0.20 ? "arb-highlight" : "";
+
+    // Format next funding countdown
+    let nextStr = "-";
+    if (nextMs) {
+      const diff = Math.max(0, nextMs - Date.now());
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      nextStr = `${h}h ${m}m`;
+    }
+
+    const spreadCls = spread === null ? "" : Math.abs(spread) > 0.0005 ? "arb-spread" : "";
+
+    const tr = document.createElement("tr");
+    if (rowCls) tr.classList.add(rowCls);
+    tr.innerHTML = `
+      <td><strong>${item.symbol}</strong></td>
+      <td class="${bnCls}">${fmtRate(bnRate)}</td>
+      <td class="${okxCls}">${fmtRate(okxRate)}</td>
+      <td class="${spreadCls}">${spread !== null ? fmtRate(spread) : "-"}</td>
+      <td class="${spreadCls}">${annual !== null ? (annual * 100).toFixed(1) + "%" : "-"}</td>
+      <td>${nextStr}</td>
+    `;
+    elements.fundingBody.appendChild(tr);
+  });
+}
+
 function renderMovers(movers) {
   const filtered =
     currentMarketFilter === "all"
@@ -430,6 +485,7 @@ function renderState(state) {
   renderOpenInterest(state.openInterest);
   renderETFChart(state.etfHistory?.["us-btc-spot"], elements.etfBtcChart, etfBtcHolder);
   renderETFChart(state.etfHistory?.["us-eth-spot"], elements.etfEthChart, etfEthHolder);
+  renderFundingRates(state.fundingRates);
   renderMovers(state.priceMovers);
   renderSpreads(state.topSpreads);
   renderOpportunities(state.recentOpportunities);

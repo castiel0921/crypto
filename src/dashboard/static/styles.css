@@ -350,6 +350,12 @@ h1 {
   color: #fb7185;
 }
 
+/* Funding rate table colors */
+.positive-rate { color: #fb7185; }   /* positive = longs pay = bearish signal */
+.negative-rate { color: #34d399; }   /* negative = shorts pay = bullish signal */
+.arb-spread { color: #ffd666; font-weight: 600; }
+tr.arb-highlight { background: rgba(255, 214, 102, 0.06); }
+
 @media (max-width: 920px) {
   .hero,
   .panel-grid,

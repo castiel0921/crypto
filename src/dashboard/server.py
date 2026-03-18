@@ -86,6 +86,8 @@ class DashboardStore:
                 h = etf_db.get_history(t)
                 if h:
                     self._etf_history[t] = h
+        # Funding rates
+        self._funding_rates: list[dict[str, Any]] = []
 
     async def record_quote(self, quote: BestQuote) -> None:
         key = (quote.symbol, quote.exchange)
@@ -157,6 +159,7 @@ class DashboardStore:
             "priceMovers": self._build_price_movers(),
             "recentOpportunities": list(self.recent_opportunities),
             "etfHistory": self._etf_history,
+            "fundingRates": self._funding_rates,
             "delivery": {
                 "lark": self.lark_status,
             },
@@ -265,6 +268,10 @@ class DashboardStore:
         # Re-attach to current OI data
         for item in self._open_interest:
             item["dailyHistory"] = self._oi_daily_history.get(item["symbol"], [])
+        await self.broadcast_snapshot()
+
+    async def update_funding_rates(self, data: list[dict[str, Any]]) -> None:
+        self._funding_rates = data
         await self.broadcast_snapshot()
 
     async def update_etf_history(self, etf_type: str, records: list[dict[str, Any]]) -> None:

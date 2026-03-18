@@ -98,6 +98,29 @@
 
       <section class="panel">
         <div class="panel-heading">
+          <h2>资金费率套利</h2>
+          <span class="panel-tag">USDT永续 · 每30秒更新</span>
+        </div>
+        <div class="spread-table-wrapper">
+          <table class="spread-table" id="funding-table">
+            <thead>
+              <tr>
+                <th>交易对</th>
+                <th>Binance费率</th>
+                <th>OKX费率</th>
+                <th>跨所差价</th>
+                <th>年化套利</th>
+                <th>下次结算</th>
+              </tr>
+            </thead>
+            <tbody id="funding-body"></tbody>
+          </table>
+          <div class="empty-state" id="funding-empty">等待资金费率数据...</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
           <h2>5分钟涨跌幅</h2>
           <span class="panel-tag">实时更新</span>
         </div>

@@ -34,6 +34,8 @@ from okx_ws import OKXMultiSubClient, Subscription  # noqa: E402
 _OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
 _OKX_OI_HISTORY_URL = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-volume"
 _SOSOVALUE_ETF_URL = "https://api.sosovalue.xyz/openapi/v2/etf/historicalInflowChart"
+_BINANCE_FUNDING_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
+_OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate"
 
 
 async def _fetch_json(session: aiohttp.ClientSession, url: str, **params: str) -> dict:
@@ -307,6 +309,101 @@ async def poll_etf_history(
 
         except Exception as exc:
             poll_logger.warning("ETF poll cycle failed: %s", exc)
+
+        await asyncio.sleep(interval)
+
+
+async def poll_funding_rates(
+    store: DashboardStore,
+    market_types: list[MarketType],
+    all_pairs: dict[MarketType, list[str]],
+    interval: float = 30.0,
+) -> None:
+    """Fetch current funding rates from Binance and OKX, compute cross-exchange spread."""
+    poll_logger = logging.getLogger("funding_rates")
+
+    if MarketType.USDT_PERP not in market_types:
+        return
+
+    usdt_perp_symbols = all_pairs.get(MarketType.USDT_PERP, [])
+    if not usdt_perp_symbols:
+        return
+
+    # Wait for initial data to settle
+    await asyncio.sleep(15)
+
+    while True:
+        try:
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                # Binance: single call for all USDT perp funding rates
+                bn_rates: dict[str, dict] = {}
+                try:
+                    data = await _fetch_json(session, _BINANCE_FUNDING_URL)
+                    if isinstance(data, list):
+                        for item in data:
+                            bn_rates[item["symbol"]] = {
+                                "rate": float(item.get("lastFundingRate", 0)),
+                                "nextFunding": item.get("nextFundingTime", 0),
+                            }
+                except Exception as exc:
+                    poll_logger.warning("Binance funding rates failed: %s", exc)
+
+                # OKX: one call per tracked symbol
+                okx_rates: dict[str, dict] = {}
+                for symbol in usdt_perp_symbols[:50]:  # cap to 50 symbols
+                    try:
+                        resp = await _fetch_json(
+                            session, _OKX_FUNDING_URL, instId=symbol
+                        )
+                        items = resp.get("data", []) if isinstance(resp, dict) else []
+                        if items:
+                            d = items[0]
+                            okx_rates[symbol] = {
+                                "rate": float(d.get("fundingRate", 0)),
+                                "nextFunding": int(d.get("fundingTime", 0)),
+                            }
+                    except Exception as exc:
+                        poll_logger.debug("OKX funding rate %s failed: %s", symbol, exc)
+                    await asyncio.sleep(0.05)
+
+                # Build combined records
+                results: list[dict] = []
+                for symbol in usdt_perp_symbols[:50]:
+                    base = symbol.split("-")[0]
+                    bn_sym = base + "USDT"
+                    bn = bn_rates.get(bn_sym)
+                    okx = okx_rates.get(symbol)
+                    if bn is None and okx is None:
+                        continue
+                    bn_rate = bn["rate"] if bn else None
+                    okx_rate = okx["rate"] if okx else None
+                    spread = None
+                    if bn_rate is not None and okx_rate is not None:
+                        spread = bn_rate - okx_rate
+                    # Annualized: 3 payments/day * 365 days
+                    annual = abs(spread) * 3 * 365 if spread is not None else None
+                    next_funding_ms = (
+                        bn["nextFunding"] if bn else (okx["nextFunding"] if okx else 0)
+                    )
+                    results.append({
+                        "symbol": base,
+                        "binanceRate": bn_rate,
+                        "okxRate": okx_rate,
+                        "spread": spread,
+                        "annualizedSpread": annual,
+                        "nextFundingMs": next_funding_ms,
+                    })
+
+                # Sort by absolute spread desc (best arb first)
+                results.sort(
+                    key=lambda x: abs(x["spread"]) if x["spread"] is not None else 0,
+                    reverse=True,
+                )
+                await store.update_funding_rates(results)
+                poll_logger.info("Funding rates updated: %d symbols", len(results))
+
+        except Exception as exc:
+            poll_logger.warning("Funding rate poll cycle failed: %s", exc)
 
         await asyncio.sleep(interval)
 
@@ -588,6 +685,10 @@ async def async_main() -> None:
             ws_tasks.append(asyncio.create_task(
                 poll_etf_history(dashboard_store, args.sosovalue_api_key)
             ))
+        # Funding rate polling (only meaningful for perp markets)
+        ws_tasks.append(asyncio.create_task(
+            poll_funding_rates(dashboard_store, market_types, all_pairs)
+        ))
 
     try:
         await asyncio.gather(*ws_tasks)
