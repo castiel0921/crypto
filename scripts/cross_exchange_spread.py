@@ -256,12 +256,13 @@ async def poll_etf_history(
                         ) as resp:
                             resp.raise_for_status()
                             body = await resp.json()
-                            records = body.get("data", [])
+                            data = body.get("data") or {}
+                            records = data.get("list", []) if isinstance(data, dict) else data
                             if records:
                                 await store.update_etf_history(etf_type, records)
                                 poll_logger.info(
                                     "ETF %s updated: %d records, latest %s",
-                                    etf_type, len(records), records[0].get("date"),
+                                    etf_type, len(records), records[-1].get("date"),
                                 )
                     except Exception as exc:
                         poll_logger.warning("ETF %s fetch failed: %s", etf_type, exc)
