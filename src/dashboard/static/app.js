@@ -355,12 +355,19 @@ function renderFundingRates(data) {
     const spreadCls = spread === null ? "" : Math.abs(spread) > 0.0005 ? "arb-spread" : "";
 
     // Arbitrage direction: if spread > 0 → short Binance + long OKX; else long Binance + short OKX
+    // short = sell at bid; long = buy at ask
     let dirHtml = "-";
+    let bnEntryPrice = null;
+    let okxEntryPrice = null;
     if (spread !== null && Math.abs(spread) > 0.00001) {
       if (spread > 0) {
         dirHtml = '<span class="arb-dir">空BN · 多OKX</span>';
+        bnEntryPrice = item.binanceBid;   // short Binance → sell at bid
+        okxEntryPrice = item.okxAsk;      // long OKX → buy at ask
       } else {
         dirHtml = '<span class="arb-dir">多BN · 空OKX</span>';
+        bnEntryPrice = item.binanceAsk;   // long Binance → buy at ask
+        okxEntryPrice = item.okxBid;      // short OKX → sell at bid
       }
     }
 
@@ -373,6 +380,8 @@ function renderFundingRates(data) {
       <td class="${spreadCls}">${spread !== null ? fmtRate(Math.abs(spread)) : "-"}</td>
       <td class="${spreadCls}">${annual !== null ? (annual * 100).toFixed(1) + "%" : "-"}</td>
       <td>${dirHtml}</td>
+      <td>${bnEntryPrice !== null ? formatSig(bnEntryPrice) : "-"}</td>
+      <td>${okxEntryPrice !== null ? formatSig(okxEntryPrice) : "-"}</td>
       <td>${nextStr}</td>
     `;
     elements.fundingBody.appendChild(tr);

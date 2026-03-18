@@ -385,6 +385,10 @@ async def poll_funding_rates(
                     next_funding_ms = (
                         bn["nextFunding"] if bn else (okx["nextFunding"] if okx else 0)
                     )
+                    # Enrich with live bid/ask from websocket quotes
+                    okx_sym = symbol  # e.g. BTC-USDT-SWAP
+                    bn_q = store.latest_quotes.get((okx_sym, "binance"))
+                    okx_q = store.latest_quotes.get((okx_sym, "okx"))
                     results.append({
                         "symbol": base,
                         "binanceRate": bn_rate,
@@ -392,6 +396,10 @@ async def poll_funding_rates(
                         "spread": spread,
                         "annualizedSpread": annual,
                         "nextFundingMs": next_funding_ms,
+                        "binanceBid": float(bn_q["bidPrice"]) if bn_q else None,
+                        "binanceAsk": float(bn_q["askPrice"]) if bn_q else None,
+                        "okxBid": float(okx_q["bidPrice"]) if okx_q else None,
+                        "okxAsk": float(okx_q["askPrice"]) if okx_q else None,
                     })
 
                 # Sort by absolute spread desc (best arb first)
