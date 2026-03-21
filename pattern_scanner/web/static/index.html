@@ -432,8 +432,8 @@ function renderResults() {
       <td class="${r.trigger_met ? 'trigger-yes' : 'trigger-no'}">${r.trigger_met ? '✓ 触发' : '—'}</td>
       <td>${llmHtml}</td>
       <td style="font-size:12px">
-        <div style="color:var(--text)">${barTime}</div>
-        ${winStr ? `<div style="color:var(--text2);font-size:11px">窗口: ${winStr} ~</div>` : ''}
+        ${winStr ? `<div style="color:var(--text2);font-size:11px">${winStr}</div>` : ''}
+        <div style="color:var(--text)">→ ${barTime}</div>
       </td>
     </tr>`;
   }).join('');
