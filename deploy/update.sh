@@ -57,7 +57,8 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
 fi
 
 echo "[deploy] installing dependencies"
-"$VENV_PIP" install -r "$ROOT_DIR/requirements.txt"
+"$VENV_PIP" install --quiet --upgrade pip
+"$VENV_PIP" install --quiet -r "$ROOT_DIR/requirements.txt"
 
 if [[ ${#SERVICES[@]} -eq 0 ]]; then
   echo "[deploy] skipping service restart"
