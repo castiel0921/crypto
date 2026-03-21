@@ -27,8 +27,8 @@ dist/
 build/
 coverage/
 
-# Data
-data/
+# Data (root-level only)
+/data/
 
 # Pattern Scanner runtime artifacts
 pattern_scanner/*.db
