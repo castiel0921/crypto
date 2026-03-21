@@ -188,6 +188,7 @@
 <div class="tabs">
   <div class="tab active" onclick="switchTab('results', this)">扫描结果</div>
   <div class="tab" onclick="switchTab('patterns', this)">形态定义</div>
+  <div class="tab" onclick="switchTab('history', this)">历史分析</div>
   <div class="tab" onclick="switchTab('backtest', this)">回测统计</div>
 </div>
 
@@ -266,6 +267,70 @@
     </div>
   </div>
 
+  <!-- ── 历史分析页 ── -->
+  <div id="tab-history" class="hidden">
+    <div class="filter-bar" style="margin-bottom:16px">
+      <label>形态</label>
+      <select id="h-pattern">
+        <option value="">全部</option>
+        <option value="A1">A1 上升后平台整理</option>
+        <option value="A2">A2 长均线托底横盘</option>
+        <option value="A3">A3 假跌破回收</option>
+        <option value="B1">B1 下跌中继</option>
+        <option value="B2">B2 平台破位</option>
+        <option value="B3">B3 空头趋势弱反弹</option>
+      </select>
+      <label>交易对</label>
+      <input type="text" id="h-symbol" placeholder="如 BTCUSDT" style="width:120px;padding:5px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+      <label>体制</label>
+      <select id="h-regime">
+        <option value="">全部</option>
+        <option value="bull_trend">bull trend</option>
+        <option value="bear_trend">bear trend</option>
+        <option value="ranging">ranging</option>
+      </select>
+      <label>天数</label>
+      <select id="h-days">
+        <option value="7">7天</option>
+        <option value="30" selected>30天</option>
+        <option value="90">90天</option>
+      </select>
+      <label>远期K线</label>
+      <select id="h-fwd">
+        <option value="4">4根(16h)</option>
+        <option value="12" selected>12根(48h)</option>
+        <option value="24">24根(96h)</option>
+      </select>
+      <button onclick="loadHistory()" style="padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px">查询</button>
+      <div class="filter-sep"></div>
+      <button id="bt-run-btn" onclick="runBacktest()" style="padding:5px 14px;border-radius:6px;border:1px solid var(--blue);background:#0d1f3a;color:var(--blue);cursor:pointer;font-size:13px">运行回测</button>
+    </div>
+
+    <!-- 汇总统计条 -->
+    <div id="h-summary" class="hidden" style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap"></div>
+
+    <!-- 远期收益分布 -->
+    <div id="h-dist" class="hidden" style="margin-bottom:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">远期收益分布（每格=0.5%）</div>
+      <div id="h-dist-bars" style="display:flex;align-items:flex-end;gap:2px;height:60px"></div>
+      <div id="h-dist-labels" style="display:flex;gap:2px;margin-top:4px;font-size:10px;color:var(--text2)"></div>
+    </div>
+
+    <!-- 命中记录表 -->
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>交易对</th><th>形态</th><th>方向</th><th>得分</th><th>体制</th>
+            <th>触发</th><th>LLM</th><th>K线时间</th>
+            <th>远期收益(${document.getElementById('h-fwd')?.value||12}根)</th>
+          </tr>
+        </thead>
+        <tbody id="h-tbody"><tr><td colspan="9" class="loading">选择条件后点击查询</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ── 回测统计页 ── -->
   <div id="tab-backtest" class="hidden">
     <div id="backtest-content">
@@ -286,7 +351,7 @@ let _backtest     = [];
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  ['results','patterns','backtest'].forEach(n => {
+  ['results','patterns','history','backtest'].forEach(n => {
     document.getElementById('tab-' + n).classList.toggle('hidden', n !== name);
   });
   if (name === 'backtest' && !_backtest.length) loadBacktest();
@@ -581,6 +646,138 @@ function renderBacktest() {
   }).join('');
 
   container.innerHTML = sections;
+}
+
+// ── 历史分析 ─────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const pid  = document.getElementById('h-pattern').value;
+  const sym  = document.getElementById('h-symbol').value.trim().toUpperCase();
+  const reg  = document.getElementById('h-regime').value;
+  const days = document.getElementById('h-days').value;
+  const fwd  = document.getElementById('h-fwd').value;
+  document.getElementById('h-tbody').innerHTML = `<tr><td colspan="9" class="loading">查询中...</td></tr>`;
+  document.getElementById('h-summary').classList.add('hidden');
+  document.getElementById('h-dist').classList.add('hidden');
+
+  let url = `/api/scan-history?days=${days}&forward_bars=${fwd}&limit=500`;
+  if (pid) url += `&pattern_id=${pid}`;
+  if (sym) url += `&symbol=${sym}`;
+  if (reg) url += `&regime=${reg}`;
+
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    renderHistory(d.hits || [], d.summary || {}, parseInt(fwd));
+  } catch(e) {
+    document.getElementById('h-tbody').innerHTML = `<tr><td colspan="9" style="color:var(--red);text-align:center">${e}</td></tr>`;
+  }
+}
+
+function renderHistory(hits, summary, fwd) {
+  // 汇总条
+  if (summary.sample > 0) {
+    const wr = ((summary.win_rate || 0) * 100).toFixed(1);
+    const ar = ((summary.avg_return || 0) * 100).toFixed(2);
+    const cards = [
+      { label: '样本数', val: summary.sample, color: '' },
+      { label: '胜率', val: wr + '%', color: summary.win_rate >= 0.55 ? 'var(--green)' : summary.win_rate >= 0.45 ? 'var(--yellow)' : 'var(--red)' },
+      { label: '平均收益', val: ar + '%', color: summary.avg_return > 0 ? 'var(--green)' : 'var(--red)' },
+      { label: '最大收益', val: ((summary.max_return||0)*100).toFixed(2)+'%', color: 'var(--green)' },
+      { label: '最大亏损', val: ((summary.min_return||0)*100).toFixed(2)+'%', color: 'var(--red)' },
+    ];
+    const el = document.getElementById('h-summary');
+    el.innerHTML = cards.map(c => `
+      <div class="stat-card" style="min-width:120px">
+        <div class="label">${c.label}</div>
+        <div class="value" style="font-size:20px;${c.color?'color:'+c.color:''}">${c.val}</div>
+      </div>`).join('');
+    el.classList.remove('hidden');
+
+    // 分布图
+    const rets = hits.filter(h => h.forward_return != null).map(h => h.forward_return);
+    if (rets.length) renderDist(rets);
+  }
+
+  if (!hits.length) {
+    document.getElementById('h-tbody').innerHTML = `<tr><td colspan="9" class="empty"><div class="icon">🔍</div>暂无历史记录</td></tr>`;
+    return;
+  }
+
+  document.getElementById('h-tbody').innerHTML = hits.map(h => {
+    const score = h.total_score || 0;
+    const color = score >= 85 ? 'var(--green)' : score >= 75 ? 'var(--yellow)' : 'var(--text2)';
+    const cat   = (h.pattern_id||'')[0];
+    const fwdRet = h.forward_return;
+    let fwdHtml;
+    if (fwdRet == null) {
+      fwdHtml = '<span style="color:var(--text2)">—</span>';
+    } else {
+      const pct = (fwdRet * 100).toFixed(2) + '%';
+      const fc  = fwdRet > 0.01 ? 'var(--green)' : fwdRet < -0.01 ? 'var(--red)' : 'var(--yellow)';
+      fwdHtml = `<span style="color:${fc};font-weight:600">${fwdRet > 0 ? '+' : ''}${pct}</span>`;
+    }
+    const conf = h.llm_confidence;
+    const llm  = conf ? `<span class="${conf >= 0.7 ? 'llm-high' : conf >= 0.5 ? 'llm-medium' : 'llm-low'}">${(conf*100).toFixed(0)}%</span>` : '—';
+    const bt   = h.bar_time ? new Date(h.bar_time).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+    const regClass = (h.regime||'').includes('bull') ? 'bull' : (h.regime||'').includes('bear') ? 'bear' : 'ranging';
+    return `<tr>
+      <td class="symbol">${(h.symbol||'').replace('USDT','')}<span style="color:var(--text2)">/USDT</span></td>
+      <td><span class="pill pill-${cat}">${h.pattern_id}</span> <span style="color:var(--text2);font-size:11px">${h.pattern_name||''}</span></td>
+      <td><span class="pill pill-${h.direction}">${h.direction==='long'?'做多':h.direction==='short'?'做空':'—'}</span></td>
+      <td><span style="color:${color};font-weight:600">${score.toFixed(0)}</span></td>
+      <td><span class="pill pill-${regClass}">${(h.regime||'').replace('_',' ')}</span></td>
+      <td class="${h.trigger_met?'trigger-yes':'trigger-no'}">${h.trigger_met?'✓':'—'}</td>
+      <td>${llm}</td>
+      <td style="color:var(--text2);font-size:12px">${bt}</td>
+      <td>${fwdHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderDist(rets) {
+  const bucketSize = 0.005; // 0.5%
+  const min = -0.10, max = 0.10;
+  const buckets = {};
+  for (let b = min; b < max; b += bucketSize) {
+    buckets[b.toFixed(3)] = 0;
+  }
+  for (const r of rets) {
+    const b = (Math.floor(r / bucketSize) * bucketSize).toFixed(3);
+    if (buckets[b] !== undefined) buckets[b]++;
+  }
+  const vals  = Object.values(buckets);
+  const maxV  = Math.max(...vals, 1);
+  const barsEl   = document.getElementById('h-dist-bars');
+  const labelsEl = document.getElementById('h-dist-labels');
+  barsEl.innerHTML = Object.entries(buckets).map(([k, v]) => {
+    const h = Math.round((v / maxV) * 60);
+    const pct = parseFloat(k) * 100;
+    const col = pct > 0.5 ? 'var(--green)' : pct < -0.5 ? 'var(--red)' : 'var(--yellow)';
+    return `<div style="width:8px;height:${h}px;background:${col};border-radius:2px 2px 0 0;flex-shrink:0" title="${pct.toFixed(1)}%: ${v}次"></div>`;
+  }).join('');
+  labelsEl.innerHTML = Object.keys(buckets).filter((k,i) => i % 8 === 0).map(k =>
+    `<span style="flex:1;text-align:center">${(parseFloat(k)*100).toFixed(0)}%</span>`
+  ).join('');
+  document.getElementById('h-dist').classList.remove('hidden');
+}
+
+async function runBacktest() {
+  const btn = document.getElementById('bt-run-btn');
+  btn.textContent = '运行中...';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/run-backtest', {method:'POST'});
+    const d = await r.json();
+    if (d.error) alert('回测失败: ' + d.error);
+    else {
+      alert(`回测完成！计算了 ${d.groups_computed} 个形态×体制组合，覆盖 ${d.symbols} 个交易对`);
+      _backtest = [];  // 清空缓存，下次切到回测tab时重新加载
+    }
+  } catch(e) { alert('请求失败: ' + e); }
+  finally {
+    btn.textContent = '运行回测';
+    btn.disabled = false;
+  }
 }
 
 // ── 展开详情 ─────────────────────────────────────────────────────────────────

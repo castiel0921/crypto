@@ -185,6 +185,142 @@ async def handle_stats(request: web.Request) -> web.Response:
         return _json({'error': str(e)}, status=500)
 
 
+async def handle_scan_history(request: web.Request) -> web.Response:
+    """GET /api/scan-history — 历史命中记录，含远期收益"""
+    pattern_id   = request.rel_url.query.get('pattern_id')
+    symbol       = request.rel_url.query.get('symbol')
+    regime       = request.rel_url.query.get('regime')
+    days         = int(request.rel_url.query.get('days', '30'))
+    forward_bars = int(request.rel_url.query.get('forward_bars', '12'))
+    limit        = int(request.rel_url.query.get('limit', '300'))
+    since        = datetime.utcnow() - timedelta(days=days)
+
+    try:
+        async with get_session() as session:
+            q = (
+                select(PatternScanResultORM)
+                .where(
+                    PatternScanResultORM.is_filter_hit == False,
+                    PatternScanResultORM.bar_time      >= since,
+                )
+                .order_by(desc(PatternScanResultORM.bar_time))
+                .limit(limit)
+            )
+            if pattern_id: q = q.where(PatternScanResultORM.pattern_id == pattern_id)
+            if symbol:     q = q.where(PatternScanResultORM.symbol     == symbol)
+            if regime:     q = q.where(PatternScanResultORM.regime     == regime)
+            rows = (await session.execute(q)).scalars().all()
+
+        # 批量加载每个 symbol 的 kline 数据，用于计算远期收益
+        from ..database.models import KlineCacheORM
+        symbols_needed = list({r.symbol for r in rows})
+        kline_map: dict[str, list] = {}
+        async with get_session() as session:
+            for sym in symbols_needed:
+                krows = (await session.execute(
+                    select(KlineCacheORM)
+                    .where(KlineCacheORM.symbol == sym, KlineCacheORM.interval == '4h')
+                    .order_by(KlineCacheORM.open_time.asc())
+                )).scalars().all()
+                kline_map[sym] = [(r.open_time, r.close) for r in krows]
+
+        import bisect
+
+        def calc_fwd(sym, bar_time, n, direction):
+            klines = kline_map.get(sym, [])
+            if not klines:
+                return None
+            times = [k[0] for k in klines]
+            bt = bar_time.replace(tzinfo=None) if hasattr(bar_time, 'tzinfo') and bar_time.tzinfo else bar_time
+            idx = bisect.bisect_left(times, bt)
+            if idx < 0 or idx + n >= len(klines):
+                return None
+            entry = klines[idx][1]
+            exit_ = klines[idx + n][1]
+            if not entry:
+                return None
+            ret = (exit_ - entry) / entry
+            return round(-ret if direction == 'short' else ret, 4)
+
+        data = []
+        for r in rows:
+            fwd = calc_fwd(r.symbol, r.bar_time, forward_bars, r.direction or 'long')
+            data.append({
+                'id':           r.id,
+                'symbol':       r.symbol,
+                'pattern_id':   r.pattern_id,
+                'pattern_name': r.pattern_name,
+                'direction':    r.direction,
+                'regime':       r.regime,
+                'total_score':  r.total_score,
+                'trigger_met':  r.trigger_met,
+                'llm_confidence': r.llm_confidence,
+                'bar_time':     r.bar_time.isoformat() if r.bar_time else None,
+                'forward_return': fwd,
+                'forward_bars': forward_bars,
+            })
+
+        # 聚合统计
+        valid = [d for d in data if d['forward_return'] is not None]
+        win_threshold = 0.01
+        summary = {}
+        if valid:
+            rets = [d['forward_return'] for d in valid]
+            summary = {
+                'sample':    len(valid),
+                'win_rate':  round(sum(1 for r in rets if r > win_threshold) / len(rets), 3),
+                'avg_return': round(sum(rets) / len(rets), 4),
+                'max_return': round(max(rets), 4),
+                'min_return': round(min(rets), 4),
+            }
+
+        return _json({'hits': data, 'count': len(data), 'summary': summary})
+    except Exception as e:
+        logger.error('handle_scan_history error: %s', e, exc_info=True)
+        return _json({'error': str(e)}, status=500)
+
+
+async def handle_run_backtest(request: web.Request) -> web.Response:
+    """POST /api/run-backtest — 手动触发历史回测统计"""
+    try:
+        from ..backtest.stats_builder import BacktestStatsBuilder, BacktestConfig
+        from ..database.models import KlineCacheORM
+        import pandas as pd
+
+        async with get_session() as session:
+            syms_result = await session.execute(
+                select(KlineCacheORM.symbol).distinct()
+            )
+            symbols = [r[0] for r in syms_result.fetchall()]
+
+        kline_data: dict[str, pd.DataFrame] = {}
+        async with get_session() as session:
+            for sym in symbols[:100]:
+                krows = (await session.execute(
+                    select(KlineCacheORM)
+                    .where(KlineCacheORM.symbol == sym, KlineCacheORM.interval == '4h')
+                    .order_by(KlineCacheORM.open_time.asc())
+                )).scalars().all()
+                if len(krows) >= 50:
+                    import pandas as pd
+                    df = pd.DataFrame([{
+                        'open':   r.open,  'high': r.high,
+                        'low':    r.low,   'close': r.close,
+                        'volume': r.volume,
+                    } for r in krows],
+                    index=pd.DatetimeIndex([r.open_time for r in krows]))
+                    kline_data[sym] = df
+
+        from ..database.repository import PatternRepository
+        repo  = PatternRepository()
+        builder = BacktestStatsBuilder(repo)
+        all_stats = await builder.build_all(kline_data, BacktestConfig())
+        return _json({'status': 'ok', 'groups_computed': len(all_stats), 'symbols': len(kline_data)})
+    except Exception as e:
+        logger.error('handle_run_backtest error: %s', e, exc_info=True)
+        return _json({'error': str(e)}, status=500)
+
+
 async def handle_backtest(request: web.Request) -> web.Response:
     """GET /api/backtest — 回测统计，按形态汇总胜率/收益"""
     try:
@@ -268,8 +404,10 @@ def create_app() -> web.Application:
     app.router.add_get('/api/patterns',      handle_patterns)
     app.router.add_get('/api/results',       handle_results)
     app.router.add_get('/api/stats',         handle_stats)
-    app.router.add_get('/api/backtest',      handle_backtest)
+    app.router.add_get('/api/backtest',       handle_backtest)
     app.router.add_get('/api/regime-stats',  handle_regime_stats)
+    app.router.add_get('/api/scan-history',  handle_scan_history)
+    app.router.add_post('/api/run-backtest', handle_run_backtest)
     app.router.add_static('/static',         STATIC_DIR)
     return app
 
