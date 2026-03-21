@@ -13,6 +13,7 @@ EnvironmentFile=-/home/ubuntu/projects/crypto/.env
 ExecStart=/home/ubuntu/projects/crypto/.venv/bin/python -m pattern_scanner.scheduler
 Restart=always
 RestartSec=10
+# Web dashboard runs on port 8082 — ensure firewall allows it
 
 [Install]
 WantedBy=multi-user.target

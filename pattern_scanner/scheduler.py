@@ -24,18 +24,22 @@ from apscheduler.triggers.interval import IntervalTrigger
 from .database.repository import PatternRepository
 from .database.session import init_db, dispose_engine
 from .main import run_full_pipeline
+from .web.server import start_web_server
 
 logger = logging.getLogger(__name__)
 
-ENV_DB_URL     = 'PATTERN_SCANNER_DB_URL'
-ENV_API_KEY    = 'ANTHROPIC_API_KEY'
-ENV_LLM_MODEL  = 'PATTERN_SCANNER_LLM_MODEL'
-ENV_TIMEFRAME  = 'PATTERN_SCANNER_TIMEFRAME'
-ENV_KLINE_BARS = 'PATTERN_SCANNER_KLINE_BARS'
-ENV_RUN_LLM    = 'PATTERN_SCANNER_RUN_LLM'
+ENV_DB_URL        = 'PATTERN_SCANNER_DB_URL'
+ENV_API_KEY       = 'DEEPSEEK_API_KEY'
+ENV_LLM_BASE_URL  = 'LLM_BASE_URL'
+ENV_LLM_MODEL     = 'LLM_MODEL'
+ENV_TIMEFRAME     = 'PATTERN_SCANNER_TIMEFRAME'
+ENV_KLINE_BARS    = 'PATTERN_SCANNER_KLINE_BARS'
+ENV_RUN_LLM       = 'PATTERN_SCANNER_RUN_LLM'
 
 DEFAULT_DB_URL   = 'sqlite+aiosqlite:///./pattern_scanner.db'
 DEFAULT_TF       = '4h'
+DEFAULT_LLM_URL  = 'https://api.deepseek.com'
+DEFAULT_LLM_MODEL = 'deepseek-chat'
 STALE_MINUTES    = 35
 
 
@@ -47,21 +51,27 @@ class PatternScannerScheduler:
 
     def __init__(
         self,
-        db_url:     Optional[str] = None,
-        api_key:    Optional[str] = None,
-        timeframe:  str = DEFAULT_TF,
-        kline_bars: int = 500,
-        run_llm:    bool = True,
-        llm_model:  str = 'claude-haiku-4-5-20251001',
+        db_url:      Optional[str] = None,
+        api_key:     Optional[str] = None,
+        timeframe:   str = DEFAULT_TF,
+        kline_bars:  int = 500,
+        run_llm:     bool = True,
+        llm_model:   str = '',
+        llm_base_url: str = '',
+        web_host:    str = '0.0.0.0',
+        web_port:    int = 8082,
     ):
-        self._db_url     = db_url     or os.environ.get(ENV_DB_URL, DEFAULT_DB_URL)
-        self._api_key    = api_key    or os.environ.get(ENV_API_KEY, '')
-        self._timeframe  = timeframe  or os.environ.get(ENV_TIMEFRAME, DEFAULT_TF)
-        self._kline_bars = kline_bars
-        self._run_llm    = run_llm
-        self._llm_model  = llm_model  or os.environ.get(ENV_LLM_MODEL, 'claude-haiku-4-5-20251001')
-        self._scheduler  = AsyncIOScheduler(timezone='UTC')
-        self._running    = False
+        self._db_url      = db_url      or os.environ.get(ENV_DB_URL, DEFAULT_DB_URL)
+        self._api_key     = api_key     or os.environ.get(ENV_API_KEY, '')
+        self._timeframe   = timeframe   or os.environ.get(ENV_TIMEFRAME, DEFAULT_TF)
+        self._kline_bars  = kline_bars
+        self._run_llm     = run_llm
+        self._llm_model   = llm_model   or os.environ.get(ENV_LLM_MODEL, DEFAULT_LLM_MODEL)
+        self._llm_base_url = llm_base_url or os.environ.get(ENV_LLM_BASE_URL, DEFAULT_LLM_URL)
+        self._web_host    = web_host
+        self._web_port    = web_port
+        self._scheduler   = AsyncIOScheduler(timezone='UTC')
+        self._running     = False
 
     def setup(self) -> None:
         """注册所有定时任务"""
@@ -96,11 +106,21 @@ class PatternScannerScheduler:
         logger.info('Scheduler setup complete: %d jobs registered', len(self._scheduler.get_jobs()))
 
     async def start(self) -> None:
-        """启动调度器（阻塞直到 stop() 被调用）"""
+        """启动调度器和 Web 服务器（阻塞直到 stop() 被调用）"""
         init_db(self._db_url)
         self._scheduler.start()
         self._running = True
         logger.info('PatternScannerScheduler started')
+
+        # 启动 Web 服务器（port 8082）
+        try:
+            self._web_runner = await start_web_server(
+                host=self._web_host,
+                port=self._web_port,
+            )
+        except Exception as e:
+            logger.error('Failed to start web server: %s', e)
+            self._web_runner = None
 
         try:
             while self._running:
@@ -114,6 +134,8 @@ class PatternScannerScheduler:
         self._running = False
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
+        if getattr(self, '_web_runner', None):
+            await self._web_runner.cleanup()
         await dispose_engine()
         logger.info('PatternScannerScheduler stopped')
 
@@ -123,12 +145,13 @@ class PatternScannerScheduler:
         logger.info('Starting scan job [tf=%s]', self._timeframe)
         try:
             summary = await run_full_pipeline(
-                db_url     = self._db_url,
-                api_key    = self._api_key,
-                timeframe  = self._timeframe,
-                kline_bars = self._kline_bars,
-                run_llm    = self._run_llm and bool(self._api_key),
-                llm_model  = self._llm_model,
+                db_url        = self._db_url,
+                api_key       = self._api_key,
+                timeframe     = self._timeframe,
+                kline_bars    = self._kline_bars,
+                run_llm       = self._run_llm and bool(self._api_key),
+                llm_model     = self._llm_model,
+                llm_base_url  = self._llm_base_url,
             )
             logger.info(
                 'Scan job done: %d symbols scanned, %d patterns found',

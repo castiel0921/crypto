@@ -40,8 +40,8 @@ async def run_full_pipeline(
     kline_bars:   int   = DEFAULT_KLINE_BARS,
     run_llm:      bool  = True,
     config_overrides: Optional[dict] = None,
-    llm_base_url: str   = 'https://api.anthropic.com',
-    llm_model:    str   = 'claude-haiku-4-5-20251001',
+    llm_base_url: str   = 'https://api.deepseek.com',
+    llm_model:    str   = 'deepseek-chat',
 ) -> JobSummary:
     """
     完整扫描批次：
