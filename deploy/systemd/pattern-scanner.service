@@ -1,0 +1,18 @@
+[Unit]
+Description=Pattern Scanner — Binance USDT永续合约K线形态识别引擎
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projects/crypto
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/projects/crypto
+EnvironmentFile=-/home/ubuntu/projects/crypto/.env
+ExecStart=/home/ubuntu/projects/crypto/.venv/bin/python -m pattern_scanner.scheduler
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

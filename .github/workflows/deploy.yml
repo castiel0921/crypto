@@ -16,4 +16,4 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd ~/projects/crypto
-            ./deploy/update.sh crypto-cross-spread
+            ./deploy/update.sh crypto-cross-spread pattern-scanner
