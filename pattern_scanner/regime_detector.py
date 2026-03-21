@@ -111,6 +111,9 @@ class MarketRegimeDetector:
         composite = max(0.0, min(100.0, composite))
 
         meta.update(self._compute_meta(df, ma20, ma60, ma120, atr14, atr_ma30, volume))
+        meta['regime_strength'] = self._compute_regime_strength(
+            regime, trend_score, composite, close, ma20, ma60, ma120, atr_ratio
+        )
 
         return RegimeResult(
             regime       = regime,
@@ -235,6 +238,47 @@ class MarketRegimeDetector:
             return Regime.BULL_TREND if bull_align else (Regime.BEAR_TREND if bear_align else Regime.RANGING)
         else:
             return Regime.RANGING
+
+    @staticmethod
+    def _compute_regime_strength(regime, trend_score, composite, close, ma20, ma60, ma120, atr_ratio) -> str:
+        """
+        判断当前体制的强弱：
+        - strong:  趋势得分高、价格在关键均线之上、ATR 正常
+        - medium:  条件部分满足
+        - weak:    趋势得分低、价格跌破关键均线
+        """
+        v20  = float(ma20.iloc[-1])
+        v60  = float(ma60.iloc[-1])
+        v120 = float(ma120.iloc[-1])
+        price = float(close.iloc[-1])
+
+        if regime.value == 'bull_trend':
+            above_all = price > v20 > v60 > v120
+            above_ma60 = price > v60
+            if above_all and trend_score >= 80 and atr_ratio < 1.3:
+                return 'strong'
+            elif above_ma60 and trend_score >= 65:
+                return 'medium'
+            else:
+                return 'weak'
+        elif regime.value == 'bear_trend':
+            below_all = price < v20 < v60 < v120
+            below_ma60 = price < v60
+            if below_all and trend_score >= 80 and atr_ratio < 1.3:
+                return 'strong'
+            elif below_ma60 and trend_score >= 65:
+                return 'medium'
+            else:
+                return 'weak'
+        elif regime.value == 'ranging':
+            if composite >= 65 and atr_ratio < 1.0:
+                return 'strong'
+            elif composite >= 50:
+                return 'medium'
+            else:
+                return 'weak'
+        else:  # high_vol
+            return 'weak'
 
     @staticmethod
     def _compute_meta(df, ma20, ma60, ma120, atr14, atr_ma30, volume) -> dict:

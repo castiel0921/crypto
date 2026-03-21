@@ -14,9 +14,9 @@ from aiohttp import web
 
 from ..database.repository import PatternRepository
 from ..database.session import get_session
-from ..database.models import PatternScanResultORM
+from ..database.models import PatternScanResultORM, PatternBacktestStatsORM
 from ..patterns.definitions import ALL_PATTERNS, PATTERN_REGISTRY
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,72 @@ async def handle_stats(request: web.Request) -> web.Response:
         return _json({'error': str(e)}, status=500)
 
 
+async def handle_backtest(request: web.Request) -> web.Response:
+    """GET /api/backtest — 回测统计，按形态汇总胜率/收益"""
+    try:
+        async with get_session() as session:
+            rows = (await session.execute(
+                select(PatternBacktestStatsORM)
+                .order_by(PatternBacktestStatsORM.pattern_id, PatternBacktestStatsORM.regime)
+            )).scalars().all()
+
+        data = [
+            {
+                'pattern_id':    r.pattern_id,
+                'regime':        r.regime,
+                'timeframe':     r.timeframe,
+                'forward_bars':  r.forward_bars,
+                'sample_size':   r.sample_size,
+                'win_rate':      r.win_rate,
+                'avg_return':    r.avg_return,
+                'max_drawdown':  r.max_drawdown,
+                'sharpe_like':   r.sharpe_like,
+                'stat_period_start': r.stat_period_start.isoformat() if r.stat_period_start else None,
+                'stat_period_end':   r.stat_period_end.isoformat()   if r.stat_period_end   else None,
+            }
+            for r in rows
+        ]
+        return _json({'backtest': data, 'count': len(data)})
+    except Exception as e:
+        logger.error('handle_backtest error: %s', e)
+        return _json({'error': str(e)}, status=500)
+
+
+async def handle_regime_stats(request: web.Request) -> web.Response:
+    """GET /api/regime-stats — 近期结果体制分布 + 强弱分布"""
+    hours = int(request.rel_url.query.get('hours', '168'))
+    since = datetime.utcnow() - timedelta(hours=hours)
+    try:
+        async with get_session() as session:
+            rows = (await session.execute(
+                select(PatternScanResultORM).where(
+                    PatternScanResultORM.is_filter_hit == False,
+                    PatternScanResultORM.created_at    >= since,
+                )
+            )).scalars().all()
+
+        by_regime: dict[str, int] = {}
+        pattern_scores: dict[str, list[float]] = {}
+        for r in rows:
+            reg = r.regime or 'unknown'
+            by_regime[reg] = by_regime.get(reg, 0) + 1
+            if r.pattern_id and r.total_score:
+                pattern_scores.setdefault(r.pattern_id, []).append(r.total_score)
+
+        avg_scores = {
+            pid: round(sum(scores) / len(scores), 1)
+            for pid, scores in pattern_scores.items()
+        }
+        return _json({
+            'period_hours': hours,
+            'by_regime':    by_regime,
+            'avg_score_by_pattern': avg_scores,
+        })
+    except Exception as e:
+        logger.error('handle_regime_stats error: %s', e)
+        return _json({'error': str(e)}, status=500)
+
+
 async def handle_index(request: web.Request) -> web.Response:
     """GET / — 返回前端页面"""
     index = STATIC_DIR / 'index.html'
@@ -193,11 +259,13 @@ async def handle_index(request: web.Request) -> web.Response:
 
 def create_app() -> web.Application:
     app = web.Application()
-    app.router.add_get('/',              handle_index)
-    app.router.add_get('/api/patterns',  handle_patterns)
-    app.router.add_get('/api/results',   handle_results)
-    app.router.add_get('/api/stats',     handle_stats)
-    app.router.add_static('/static',     STATIC_DIR)
+    app.router.add_get('/',                  handle_index)
+    app.router.add_get('/api/patterns',      handle_patterns)
+    app.router.add_get('/api/results',       handle_results)
+    app.router.add_get('/api/stats',         handle_stats)
+    app.router.add_get('/api/backtest',      handle_backtest)
+    app.router.add_get('/api/regime-stats',  handle_regime_stats)
+    app.router.add_static('/static',         STATIC_DIR)
     return app
 
 
