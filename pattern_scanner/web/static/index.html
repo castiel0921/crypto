@@ -233,7 +233,7 @@
             <th>强度</th>
             <th>触发</th>
             <th>LLM置信</th>
-            <th>时间</th>
+            <th>K线时间 / 分析窗口</th>
           </tr>
         </thead>
         <tbody id="result-tbody">
@@ -260,10 +260,11 @@
 </main>
 
 <script>
-let _results  = [];
-let _patterns = [];
-let _stats    = {};
-let _backtest = [];
+let _results      = [];
+let _patterns     = [];
+let _patternMap   = {};   // pattern_id → {min_bars, timeframes}
+let _stats        = {};
+let _backtest     = [];
 
 // ── 标签切换 ────────────────────────────────────────────────────────────────
 function switchTab(name, el) {
@@ -300,6 +301,11 @@ async function loadPatterns() {
   try {
     const r = await fetch('/api/patterns');
     _patterns = await r.json();
+    // 构建 patternId → 定义 映射
+    _patternMap = {};
+    for (const p of _patterns) {
+      _patternMap[p.pattern_id] = p;
+    }
     renderPatterns();
   } catch(e) { console.error('loadPatterns:', e); }
 }
@@ -379,8 +385,17 @@ function renderResults() {
     const regClass = regime.includes('bull') ? 'bull'
                    : regime.includes('bear') ? 'bear'
                    : regime.includes('ranging') ? 'ranging' : '';
-    const barTime  = r.bar_time
-      ? new Date(r.bar_time).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+    const barDt    = r.bar_time ? new Date(r.bar_time) : null;
+    const barTime  = barDt
+      ? barDt.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+    // 计算分析窗口起始时间
+    const pDef     = _patternMap[r.pattern_id];
+    const tfHours  = r.timeframe === '4h' ? 4 : r.timeframe === '1h' ? 1 : r.timeframe === '1d' ? 24 : 4;
+    const minBars  = pDef ? pDef.min_bars : 45;
+    const windowMs = minBars * tfHours * 3600 * 1000;
+    const winStart = barDt ? new Date(barDt.getTime() - windowMs) : null;
+    const winStr   = winStart
+      ? winStart.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 
     // LLM 置信度
     const conf = r.llm_confidence;
@@ -416,7 +431,10 @@ function renderResults() {
       <td>${strHtml}</td>
       <td class="${r.trigger_met ? 'trigger-yes' : 'trigger-no'}">${r.trigger_met ? '✓ 触发' : '—'}</td>
       <td>${llmHtml}</td>
-      <td style="color:var(--text2);font-size:12px">${barTime}</td>
+      <td style="font-size:12px">
+        <div style="color:var(--text)">${barTime}</div>
+        ${winStr ? `<div style="color:var(--text2);font-size:11px">窗口: ${winStr} ~</div>` : ''}
+      </td>
     </tr>`;
   }).join('');
 }
