@@ -29,3 +29,11 @@ coverage/
 
 # Data
 data/
+
+# Pattern Scanner runtime artifacts
+pattern_scanner/*.db
+pattern_scanner/*.db-journal
+pattern_scanner/dev.db
+pattern_scanner/.pytest_cache/
+pattern_scanner/htmlcov/
+pattern_scanner/.coverage

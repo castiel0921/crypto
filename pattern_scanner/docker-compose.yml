@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL 数据库 ─────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scanner123}
+      POSTGRES_DB: pattern_scanner
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d pattern_scanner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 数据库迁移（一次性 job）─────────────────────────────────────────────
+  migrate:
+    build:
+      context: ..
+      dockerfile: pattern_scanner/Dockerfile
+    command: >
+      sh -c "
+        cd /app/pattern_scanner &&
+        python -c \"
+from pattern_scanner.database.session import init_db, create_tables
+import asyncio, os
+init_db(os.environ['PATTERN_SCANNER_DB_URL'])
+asyncio.run(create_tables())
+print('Tables created.')
+\"
+      "
+    environment:
+      PATTERN_SCANNER_DB_URL: postgresql+asyncpg://scanner:${POSTGRES_PASSWORD:-scanner123}@db:5432/pattern_scanner
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── Pattern Scanner 调度器 ────────────────────────────────────────────────
+  scanner:
+    build:
+      context: ..
+      dockerfile: pattern_scanner/Dockerfile
+    restart: unless-stopped
+    environment:
+      PATTERN_SCANNER_DB_URL: postgresql+asyncpg://scanner:${POSTGRES_PASSWORD:-scanner123}@db:5432/pattern_scanner
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      PATTERN_SCANNER_TIMEFRAME: ${PATTERN_SCANNER_TIMEFRAME:-4h}
+      PATTERN_SCANNER_KLINE_BARS: ${PATTERN_SCANNER_KLINE_BARS:-500}
+      PATTERN_SCANNER_RUN_LLM: ${PATTERN_SCANNER_RUN_LLM:-true}
+      PATTERN_SCANNER_LLM_MODEL: ${PATTERN_SCANNER_LLM_MODEL:-claude-haiku-4-5-20251001}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - scanner_logs:/app/logs
+
+volumes:
+  pgdata:
+  scanner_logs:
