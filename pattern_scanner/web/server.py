@@ -123,10 +123,15 @@ async def handle_results(request: web.Request) -> web.Response:
                 'trigger_met':  r.trigger_met,
                 'llm_confidence': r.llm_confidence,
                 'llm_enter_pool': r.llm_enter_pool,
-                'llm_risk':     r.llm_risk,
-                'llm_reasoning': r.llm_reasoning,
-                'scan_batch_id': r.scan_batch_id,
-                'created_at':   r.created_at.isoformat() if r.created_at else None,
+                'llm_risk':       r.llm_risk,
+                'llm_reasoning':  r.llm_reasoning,
+                'confirm_score':  r.confirm_score,
+                'exclude_penalty': r.exclude_penalty,
+                'trigger_type':   r.trigger_type,
+                'field_results':  r.field_results,
+                'raw_values':     r.raw_values,
+                'scan_batch_id':  r.scan_batch_id,
+                'created_at':     r.created_at.isoformat() if r.created_at else None,
             }
             for r in rows
         ]

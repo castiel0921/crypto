@@ -75,12 +75,12 @@ class PatternScannerScheduler:
 
     def setup(self) -> None:
         """注册所有定时任务"""
-        # 主扫描：每4小时，整点后5分钟
+        # 主扫描：每1小时，整点后5分钟
         self._scheduler.add_job(
             self._run_scan_job,
-            trigger = CronTrigger(hour='*/4', minute=5),
-            id      = 'scan_4h',
-            name    = 'Pattern Scan 4h',
+            trigger = CronTrigger(minute=5),
+            id      = 'scan_1h',
+            name    = 'Pattern Scan 1h',
             replace_existing = True,
             misfire_grace_time = 300,
         )

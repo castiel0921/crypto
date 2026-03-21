@@ -106,6 +106,22 @@
   .llm-medium { color: var(--yellow); }
   .llm-low    { color: var(--red); }
 
+  /* ── 展开行 ── */
+  tr.expandable { cursor: pointer; }
+  tr.expandable:hover td { background: #1c2230; }
+  tr.detail-row td { padding: 0; background: #0d1117; }
+  .detail-panel { padding: 14px 20px 14px 48px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .detail-block h4 { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px; }
+  .detail-field { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--border); font-size: 12px; }
+  .detail-field:first-of-type { border-top: none; }
+  .df-status { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+  .df-pass   { background: #1a3a1a; color: var(--green); }
+  .df-fail   { background: #3a1a1a; color: var(--red); }
+  .df-na     { background: var(--bg3); color: var(--text2); }
+  .df-name   { flex: 1; color: var(--text); }
+  .df-val    { font-family: monospace; font-size: 11px; color: var(--text2); }
+  .llm-reasoning { font-size: 12px; color: var(--text2); line-height: 1.6; grid-column: 1 / -1; padding: 10px 12px; background: var(--bg2); border-radius: 6px; border-left: 3px solid var(--blue); }
+
   /* ── 形态定义卡片 ── */
   .pattern-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
   .pattern-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
@@ -417,7 +433,8 @@ function renderResults() {
     else                   strHtml = '<span class="str-weak">弱</span>';
 
     const cat = r.pattern_id ? r.pattern_id[0] : '';
-    return `<tr>
+    const rid = `row-${r.id}`;
+    const mainRow = `<tr class="expandable" onclick="toggleDetail('${rid}')">
       <td class="symbol">${r.symbol.replace('USDT','')}<span style="color:var(--text2);font-weight:400">/USDT</span></td>
       <td><span class="pill pill-${cat}">${r.pattern_id}</span> <span style="color:var(--text2);font-size:12px">${r.pattern_name || ''}</span></td>
       <td><span class="pill pill-${r.direction}">${r.direction === 'long' ? '做多' : r.direction === 'short' ? '做空' : '中性'}</span></td>
@@ -436,6 +453,8 @@ function renderResults() {
         <div style="color:var(--text)">→ ${barTime}</div>
       </td>
     </tr>`;
+    const detailRow = `<tr class="detail-row hidden" id="${rid}">${buildDetailCell(r, pDef, winStr, barTime)}</tr>`;
+    return mainRow + detailRow;
   }).join('');
 }
 
@@ -562,6 +581,97 @@ function renderBacktest() {
   }).join('');
 
   container.innerHTML = sections;
+}
+
+// ── 展开详情 ─────────────────────────────────────────────────────────────────
+function toggleDetail(rid) {
+  const row = document.getElementById(rid);
+  if (row) row.classList.toggle('hidden');
+}
+
+// ── 构建详情单元格 ────────────────────────────────────────────────────────────
+function buildDetailCell(r, pDef, winStr, barTime) {
+  const fieldResults = r.field_results || {};
+  const rawValues    = r.raw_values    || {};
+
+  // 字段结果块（分确认/排除/触发）
+  const allFields = pDef ? [
+    ...(pDef.confirm_fields || []),
+    ...(pDef.exclude_fields || []),
+    ...(pDef.trigger_fields || []),
+  ] : [];
+
+  const fieldRows = allFields.map(f => {
+    const res    = fieldResults[f.field_id] || {};
+    const hit    = res.hit;
+    const val    = res.value != null ? fmtVal(res.value) : (rawValues[f.indicator] != null ? fmtVal(rawValues[f.indicator]) : '—');
+    const type   = f.field_type;
+    let statusCls, statusIcon;
+    if (hit === true)       { statusCls = 'df-pass'; statusIcon = '✓'; }
+    else if (hit === false) { statusCls = 'df-fail'; statusIcon = '✗'; }
+    else                    { statusCls = 'df-na';   statusIcon = '·'; }
+    const borderColor = type === 'exclude' ? 'var(--red)' : type === 'trigger' ? 'var(--blue)' : hit ? 'var(--green)' : '#333';
+    return `<div class="detail-field" style="border-top-color:${borderColor}">
+      <div class="df-status ${statusCls}">${statusIcon}</div>
+      <div class="df-name">${f.field_name || f.field_id} <span style="color:var(--text2);font-size:10px">[${type}]</span></div>
+      <div class="df-val">${val}</div>
+    </div>`;
+  }).join('');
+
+  // 关键原始指标块
+  const KEY_LABELS = {
+    max_advance_45: '前序涨幅',  max_advance_40: '前序跌幅',
+    platform_range_ratio: '平台振幅比',  pullback_ratio: '回调幅度',
+    vol_ma20: '近期成交量均值',  atr14: 'ATR(14)',
+    atr_ratio: 'ATR比率',        bb_width: '布林带宽',
+    rsi14: 'RSI(14)',             ma20: 'MA20',
+    ma60: 'MA60',                 ma120: 'MA120',
+  };
+  const rawRows = Object.entries(rawValues)
+    .filter(([k]) => KEY_LABELS[k])
+    .map(([k, v]) => `<div class="detail-field">
+      <div class="df-name">${KEY_LABELS[k]}</div>
+      <div class="df-val">${fmtVal(v)}</div>
+    </div>`).join('');
+
+  // 时间段说明
+  const timeSummary = `<div style="font-size:12px;color:var(--text2);margin-bottom:8px">
+    <b style="color:var(--text)">分析区间</b>：${winStr || '—'} → ${barTime}
+    &nbsp;·&nbsp; 体制得分 ${r.regime_score?.toFixed(1) || '—'}
+    &nbsp;·&nbsp; 确认得分 ${r.confirm_score?.toFixed(1) || '—'}
+    &nbsp;·&nbsp; 排除扣分 ${r.exclude_penalty?.toFixed(1) || '—'}
+  </div>`;
+
+  // LLM推理
+  const llmBlock = r.llm_reasoning
+    ? `<div class="llm-reasoning"><b style="color:var(--blue)">LLM 分析</b>（置信 ${r.llm_confidence || '—'}，风险 ${r.llm_risk || '—'}）<br>${r.llm_reasoning}</div>`
+    : '';
+
+  return `<td colspan="9">
+    <div class="detail-panel">
+      <div class="detail-block">
+        ${timeSummary}
+        <h4>字段评估</h4>
+        ${fieldRows || '<div style="color:var(--text2);font-size:12px">暂无字段数据</div>'}
+      </div>
+      <div class="detail-block">
+        <h4>关键指标</h4>
+        ${rawRows || '<div style="color:var(--text2);font-size:12px">暂无原始指标</div>'}
+        ${llmBlock}
+      </div>
+    </div>
+  </td>`;
+}
+
+function fmtVal(v) {
+  if (v == null) return '—';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') {
+    if (Math.abs(v) < 10) return v.toFixed(4);
+    if (Math.abs(v) < 1000) return v.toFixed(2);
+    return v.toLocaleString('en-US', {maximumFractionDigits: 0});
+  }
+  return String(v);
 }
 
 // ── 初始化 ───────────────────────────────────────────────────────────────────
