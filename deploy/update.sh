@@ -56,9 +56,15 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
   python3 -m venv "$ROOT_DIR/.venv"
 fi
 
-echo "[deploy] installing dependencies"
-"$VENV_PIP" install --quiet --upgrade pip
-"$VENV_PIP" install --quiet -r "$ROOT_DIR/requirements.txt"
+REQ_HASH=$(md5sum "$ROOT_DIR/requirements.txt" | awk '{print $1}')
+HASH_FILE="$ROOT_DIR/.req_install_hash"
+if [[ -f "$HASH_FILE" ]] && [[ "$(cat "$HASH_FILE")" == "$REQ_HASH" ]]; then
+  echo "[deploy] requirements.txt unchanged, skipping pip install"
+else
+  echo "[deploy] installing dependencies"
+  "$VENV_PIP" install --quiet --prefer-binary -r "$ROOT_DIR/requirements.txt"
+  echo "$REQ_HASH" > "$HASH_FILE"
+fi
 
 if [[ ${#SERVICES[@]} -eq 0 ]]; then
   echo "[deploy] skipping service restart"
