@@ -113,7 +113,7 @@ async def handle_results(request: web.Request) -> web.Response:
                 'id':           r.id,
                 'symbol':       r.symbol,
                 'timeframe':    r.timeframe,
-                'bar_time':     r.bar_time.isoformat() if r.bar_time else None,
+                'bar_time':     (r.bar_time.isoformat() + 'Z') if r.bar_time else None,
                 'pattern_id':   r.pattern_id,
                 'pattern_name': r.pattern_name,
                 'direction':    r.direction,
@@ -255,7 +255,7 @@ async def handle_scan_history(request: web.Request) -> web.Response:
                 'total_score':  r.total_score,
                 'trigger_met':  r.trigger_met,
                 'llm_confidence': r.llm_confidence,
-                'bar_time':     r.bar_time.isoformat() if r.bar_time else None,
+                'bar_time':     (r.bar_time.isoformat() + 'Z') if r.bar_time else None,
                 'forward_return': fwd,
                 'forward_bars': forward_bars,
             })

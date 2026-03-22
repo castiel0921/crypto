@@ -437,7 +437,7 @@ function renderResults() {
     .filter(r => !dir      || r.direction  === dir)
     .filter(r => r.total_score >= minScore)
     .filter(r => !trigOnly || r.trigger_met)
-    .filter(r => !llmOnly  || (r.llm_confidence != null && r.llm_confidence >= 0.7));
+    .filter(r => !llmOnly  || r.llm_confidence === 'high');
 
   // 更新提示条
   const high    = rows.filter(r => r.total_score >= 85).length;
@@ -478,16 +478,16 @@ function renderResults() {
     const winStr   = winStart
       ? winStart.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 
-    // LLM 置信度
+    // LLM 置信度（存储值为 'high'/'medium'/'low' 字符串）
     const conf = r.llm_confidence;
     let llmHtml;
-    if (conf == null) {
+    if (!conf) {
       llmHtml = '<span style="color:var(--border)">—</span>';
     } else {
-      const cls = conf >= 0.7 ? 'llm-high' : conf >= 0.5 ? 'llm-medium' : 'llm-low';
-      const pct = (conf * 100).toFixed(0) + '%';
-      const pool = r.llm_enter_pool ? ' <span style="color:var(--green)">✓</span>' : '';
-      llmHtml = `<span class="${cls}">${pct}${pool}</span>`;
+      const cls   = conf === 'high' ? 'llm-high' : conf === 'medium' ? 'llm-medium' : 'llm-low';
+      const label = conf === 'high' ? '高' : conf === 'medium' ? '中' : '低';
+      const pool  = r.llm_enter_pool ? ' <span style="color:var(--green)">✓</span>' : '';
+      llmHtml = `<span class="${cls}">${label}${pool}</span>`;
     }
 
     // 体制强度（从 raw_values 或 meta 中取，暂用 regime_score 代理）
@@ -717,7 +717,7 @@ function renderHistory(hits, summary, fwd) {
       fwdHtml = `<span style="color:${fc};font-weight:600">${fwdRet > 0 ? '+' : ''}${pct}</span>`;
     }
     const conf = h.llm_confidence;
-    const llm  = conf ? `<span class="${conf >= 0.7 ? 'llm-high' : conf >= 0.5 ? 'llm-medium' : 'llm-low'}">${(conf*100).toFixed(0)}%</span>` : '—';
+    const llm  = conf ? `<span class="${conf==='high'?'llm-high':conf==='medium'?'llm-medium':'llm-low'}">${conf==='high'?'高':conf==='medium'?'中':'低'}</span>` : '—';
     const bt   = h.bar_time ? new Date(h.bar_time).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
     const regClass = (h.regime||'').includes('bull') ? 'bull' : (h.regime||'').includes('bear') ? 'bear' : 'ranging';
     return `<tr>
