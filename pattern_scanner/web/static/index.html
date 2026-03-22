@@ -190,6 +190,7 @@
   <div class="tab" onclick="switchTab('patterns', this)">形态定义</div>
   <div class="tab" onclick="switchTab('history', this)">历史分析</div>
   <div class="tab" onclick="switchTab('backtest', this)">回测统计</div>
+  <div class="tab" onclick="switchTab('diagnose', this)">K线诊断</div>
 </div>
 
 <main>
@@ -338,6 +339,31 @@
     </div>
   </div>
 
+  <!-- ── K线诊断页 ── -->
+  <div id="tab-diagnose" class="hidden">
+    <div class="filter-bar" style="gap:12px;flex-wrap:wrap">
+      <label>交易对</label>
+      <input id="dg-symbol" type="text" placeholder="BTC" style="width:90px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+      <label>截止时间</label>
+      <input id="dg-endtime" type="datetime-local" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+      <label>回看K线</label>
+      <select id="dg-lookback" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+        <option value="50">50根</option>
+        <option value="100" selected>100根</option>
+        <option value="200">200根</option>
+        <option value="300">300根</option>
+      </select>
+      <label>周期</label>
+      <select id="dg-tf" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+        <option value="4h" selected>4h</option>
+        <option value="1h">1h</option>
+        <option value="1d">1d</option>
+      </select>
+      <button onclick="runDiagnose()" style="background:var(--blue);color:#fff;border:none;padding:6px 18px;border-radius:4px;cursor:pointer;font-size:13px">开始诊断</button>
+    </div>
+    <div id="dg-result"></div>
+  </div>
+
 </main>
 
 <script>
@@ -351,7 +377,7 @@ let _backtest     = [];
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  ['results','patterns','history','backtest'].forEach(n => {
+  ['results','patterns','history','backtest','diagnose'].forEach(n => {
     document.getElementById('tab-' + n).classList.toggle('hidden', n !== name);
   });
   if (name === 'backtest' && !_backtest.length) loadBacktest();
@@ -874,6 +900,126 @@ function fmtVal(v) {
 // ── 初始化 ───────────────────────────────────────────────────────────────────
 loadAll();
 setInterval(loadAll, 60000); // 每分钟自动刷新
+
+// ── K线诊断 ──────────────────────────────────────────────────────────────────
+async function runDiagnose() {
+  const sym      = document.getElementById('dg-symbol').value.trim();
+  const endtime  = document.getElementById('dg-endtime').value;
+  const lookback = document.getElementById('dg-lookback').value;
+  const tf       = document.getElementById('dg-tf').value;
+  if (!sym) { alert('请输入交易对'); return; }
+
+  const el = document.getElementById('dg-result');
+  el.innerHTML = '<div class="loading" style="padding:40px">正在分析，LLM诊断需要约10秒...</div>';
+
+  try {
+    const body = { symbol: sym, timeframe: tf, lookback_bars: parseInt(lookback) };
+    if (endtime) body.end_time = new Date(endtime).toISOString();
+    const r = await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.error) { el.innerHTML = `<div class="loading" style="color:var(--red)">${d.error}</div>`; return; }
+    el.innerHTML = renderDiagnose(d);
+  } catch(e) {
+    el.innerHTML = `<div class="loading" style="color:var(--red)">请求失败: ${e}</div>`;
+  }
+}
+
+function renderDiagnose(d) {
+  // 体制卡片
+  const regCls = (d.regime||'').includes('bull') ? 'bull' : (d.regime||'').includes('bear') ? 'bear' : 'ranging';
+  const sb = d.start_bar ? new Date(d.start_bar).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  const eb = d.end_bar   ? new Date(d.end_bar).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+
+  const regimeCard = `<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+    <div class="stat-card"><div class="stat-label">交易对</div><div class="stat-value" style="font-size:18px">${d.symbol.replace('USDT','')}/USDT</div></div>
+    <div class="stat-card"><div class="stat-label">分析区间</div><div class="stat-value" style="font-size:14px">${sb} → ${eb}</div><div class="stat-label">${d.bars_analyzed}根${d.timeframe}K线</div></div>
+    <div class="stat-card"><div class="stat-label">市场体制</div><div class="stat-value"><span class="pill pill-${regCls}">${(d.regime||'').replace('_',' ')}</span></div></div>
+    <div class="stat-card"><div class="stat-label">体制得分</div><div class="stat-value" style="color:var(--yellow)">${(d.regime_score||0).toFixed(0)}</div></div>
+    <div class="stat-card"><div class="stat-label">趋势得分</div><div class="stat-value">${(d.trend_score||0).toFixed(0)}</div></div>
+    <div class="stat-card"><div class="stat-label">波动得分</div><div class="stat-value">${(d.vol_score||0).toFixed(0)}</div></div>
+  </div>`;
+
+  // 形态得分条形图
+  const scores = d.pattern_scores || [];
+  const maxScore = Math.max(...scores.map(p => p.total_score), 1);
+  const scoreRows = scores.map(p => {
+    const pct  = Math.max(0, p.total_score);
+    const barW = Math.round((pct / 100) * 100);
+    const color = pct >= 75 ? 'var(--green)' : pct >= 50 ? 'var(--yellow)' : 'var(--border)';
+    const cat   = (p.pattern_id||'A')[0];
+    const trig  = p.trigger_met ? ' <span style="color:var(--blue);font-size:11px">▲触发</span>' : '';
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="width:90px;font-size:12px;flex-shrink:0"><span class="pill pill-${cat}" style="font-size:11px;padding:1px 6px">${p.pattern_id}</span> ${p.direction==='long'?'多':'空'}</span>
+      <div style="flex:1;background:var(--border);border-radius:2px;height:14px;position:relative">
+        <div style="width:${barW}%;background:${color};height:100%;border-radius:2px;transition:width .3s"></div>
+      </div>
+      <span style="width:42px;text-align:right;font-size:13px;font-weight:600;color:${color}">${pct.toFixed(0)}</span>
+      ${trig}
+      <span style="font-size:11px;color:var(--text2);width:120px">${p.pattern_name||''}</span>
+    </div>`;
+  }).join('');
+
+  const scoresPanel = `<div class="detail-block" style="margin-bottom:16px">
+    <h4 style="margin:0 0 10px">形态得分（全量，≥75为候选）</h4>
+    ${scoreRows}
+  </div>`;
+
+  // LLM 诊断卡片
+  let llmPanel = '';
+  const llm = d.llm_analysis;
+  if (llm && !llm.error) {
+    const confCls = llm.confidence === 'high' ? 'llm-high' : llm.confidence === 'medium' ? 'llm-medium' : 'llm-low';
+    const confLabel = llm.confidence === 'high' ? '高' : llm.confidence === 'medium' ? '中' : '低';
+    const features = (llm.key_features || []).map(f => `<span style="background:var(--card2,#222);border:1px solid var(--border);padding:2px 8px;border-radius:4px;font-size:12px;margin:2px 2px">${f}</span>`).join('');
+    llmPanel = `<div class="detail-block" style="margin-bottom:16px;border-left:3px solid var(--blue)">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <h4 style="margin:0">LLM 结构诊断</h4>
+        <span style="font-size:20px;font-weight:700;color:var(--green)">${llm.structure_label||''}</span>
+        <span class="${confCls}" style="font-size:12px">置信 ${confLabel}</span>
+      </div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:8px"><b>结构类型：</b>${llm.structure_type||'—'}</div>
+      <div style="margin-bottom:8px">${features}</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.6">
+        <div><b style="color:var(--text)">趋势：</b>${llm.trend_assessment||'—'}</div>
+        <div><b style="color:var(--text)">量能：</b>${llm.volume_assessment||'—'}</div>
+        <div><b style="color:var(--text)">后续：</b>${llm.next_scenario||'—'}</div>
+        <div style="margin-top:6px"><b style="color:var(--text)">综合：</b>${llm.reasoning||'—'}</div>
+      </div>
+    </div>`;
+  } else if (llm && llm.error) {
+    llmPanel = `<div class="detail-block" style="color:var(--text2);font-size:12px">LLM诊断失败: ${llm.error}</div>`;
+  } else {
+    llmPanel = `<div class="detail-block" style="color:var(--text2);font-size:12px">LLM未配置或未运行</div>`;
+  }
+
+  // 最高分形态字段详情
+  let topDetail = '';
+  const top = d.top_pattern;
+  if (top) {
+    const fieldRows = Object.entries(top.field_results||{}).map(([fid, hit]) => {
+      const val = top.raw_values?.[fid];
+      const icon = hit ? '✓' : '✗';
+      const cls  = hit ? 'df-pass' : 'df-fail';
+      return `<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span class="${cls}" style="width:16px;text-align:center">${icon}</span>
+        <span style="flex:1;color:var(--text2)">${fid}</span>
+        <span style="color:var(--text)">${val!=null?fmtVal(val):'—'}</span>
+      </div>`;
+    }).join('');
+    topDetail = `<div class="detail-block">
+      <h4>最高分形态字段详情：${top.pattern_id} ${top.pattern_name}（${top.total_score.toFixed(0)}分）</h4>
+      ${fieldRows}
+    </div>`;
+  }
+
+  return `<div style="padding:16px">
+    ${regimeCard}
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:1;min-width:320px">${scoresPanel}${topDetail}</div>
+      <div style="flex:1;min-width:300px">${llmPanel}</div>
+    </div>
+  </div>`;
+}
 </script>
 </body>
 </html>

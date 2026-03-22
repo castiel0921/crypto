@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -396,6 +397,184 @@ async def handle_index(request: web.Request) -> web.Response:
     )
 
 
+async def handle_analyze(request: web.Request) -> web.Response:
+    """POST /api/analyze — 对指定交易对+时间段进行结构诊断（指标+LLM）"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    raw_sym = body.get('symbol', '').strip().upper().replace('/', '').replace('-', '')
+    if not raw_sym:
+        return _json({'error': 'symbol required'}, status=400)
+    symbol    = raw_sym if raw_sym.endswith('USDT') else raw_sym + 'USDT'
+    timeframe = body.get('timeframe', '4h')
+    lookback  = max(30, min(int(body.get('lookback_bars', 100)), 500))
+    end_str   = body.get('end_time')
+
+    end_dt = None
+    if end_str:
+        try:
+            end_dt = datetime.fromisoformat(end_str.replace('Z', ''))
+        except Exception:
+            pass
+
+    try:
+        from ..database.models import KlineCacheORM
+        import pandas as pd
+
+        async with get_session() as session:
+            q = (
+                select(KlineCacheORM)
+                .where(KlineCacheORM.symbol == symbol, KlineCacheORM.interval == timeframe)
+                .order_by(KlineCacheORM.open_time.asc())
+            )
+            if end_dt:
+                q = q.where(KlineCacheORM.open_time <= end_dt)
+            krows = (await session.execute(q)).scalars().all()
+
+        if not krows:
+            return _json({'error': f'No kline data for {symbol}/{timeframe}'}, status=404)
+
+        # 保留末尾 lookback+200 条（多余的用于指标计算回溯）
+        krows = list(krows)[-(lookback + 200):]
+
+        df = pd.DataFrame([{
+            'open': r.open, 'high': r.high, 'low': r.low,
+            'close': r.close, 'volume': r.volume,
+        } for r in krows], index=pd.DatetimeIndex([r.open_time for r in krows]))
+
+        if len(df) < 30:
+            return _json({'error': f'Insufficient data: {len(df)} bars'}, status=400)
+
+        from ..scanner import PatternScanner
+        from ..indicators import IndicatorLibrary
+        from ..field_evaluator import FieldEvaluator
+
+        scanner       = PatternScanner(patterns=ALL_PATTERNS)
+        regime_result = scanner.regime_detector.detect(df)
+        local_ind     = IndicatorLibrary()
+        evaluator     = FieldEvaluator(local_ind)
+
+        # 对所有 A/B 类形态打分（不过滤阈值）
+        pattern_scores = []
+        for pattern in ALL_PATTERNS:
+            if pattern.category == 'C':
+                continue
+            if len(df) < pattern.min_bars:
+                continue
+            r = scanner.score_pattern(df, pattern, regime_result, evaluator, symbol, timeframe)
+            pattern_scores.append({
+                'pattern_id':      r.pattern_id,
+                'pattern_name':    r.pattern_name,
+                'direction':       r.direction,
+                'total_score':     r.total_score,
+                'confirm_score':   r.confirm_score,
+                'exclude_penalty': r.exclude_penalty,
+                'trigger_met':     r.trigger_met,
+                'field_results':   r.field_results,
+                'raw_values':      {k: round(v, 4) for k, v in r.raw_values.items()},
+            })
+
+        pattern_scores.sort(key=lambda x: x['total_score'], reverse=True)
+        top = pattern_scores[0] if pattern_scores else None
+
+        start_bar = krows[-lookback].open_time if len(krows) >= lookback else krows[0].open_time
+        end_bar   = krows[-1].open_time
+
+        # LLM 结构诊断（可选）
+        llm_analysis = None
+        api_key      = os.environ.get('DEEPSEEK_API_KEY', '')
+        llm_base_url = os.environ.get('LLM_BASE_URL', 'https://api.deepseek.com')
+        llm_model    = os.environ.get('LLM_MODEL', 'deepseek-chat')
+        if api_key:
+            try:
+                from ..llm.base import LLMClient
+                client = LLMClient(api_key=api_key, base_url=llm_base_url, model=llm_model)
+                llm_analysis = await _llm_structure_diagnosis(
+                    client, symbol, timeframe, regime_result,
+                    pattern_scores, start_bar, end_bar, lookback,
+                )
+            except Exception as e:
+                logger.warning('LLM structure diagnosis failed: %s', e)
+                llm_analysis = {'error': str(e)}
+
+        return _json({
+            'symbol':         symbol,
+            'timeframe':      timeframe,
+            'bars_analyzed':  lookback,
+            'start_bar':      (start_bar.isoformat() + 'Z') if start_bar else None,
+            'end_bar':        (end_bar.isoformat()   + 'Z') if end_bar   else None,
+            'regime':         regime_result.regime.value,
+            'regime_score':   regime_result.score,
+            'trend_score':    regime_result.trend_score,
+            'vol_score':      regime_result.vol_score,
+            'regime_meta':    {k: (round(v, 4) if isinstance(v, float) else v)
+                               for k, v in regime_result.meta.items()},
+            'pattern_scores': pattern_scores,
+            'top_pattern':    top,
+            'llm_analysis':   llm_analysis,
+        })
+    except Exception as e:
+        logger.error('handle_analyze error: %s', e, exc_info=True)
+        return _json({'error': str(e)}, status=500)
+
+
+async def _llm_structure_diagnosis(
+    client, symbol, timeframe, regime_result,
+    pattern_scores, start_bar, end_bar, lookback,
+) -> dict:
+    """对K线段调用 LLM 做开放式结构诊断"""
+    system_prompt = (
+        "你是一个专业的加密货币技术分析师。给定一段K线的量化分析数据，"
+        "请判断这段K线属于什么市场结构，并做出综合评估。\n"
+        "只能返回合法的JSON对象，不能有任何额外文字。\n"
+        "返回格式：\n"
+        "{\n"
+        '  "structure_type": "主要结构类型（如：上升后平台整理、底部累积、下降趋势延续、'
+        '震荡三角、楔形整理等）",\n'
+        '  "structure_label": "简短标签（≤6字）",\n'
+        '  "confidence": "high/medium/low",\n'
+        '  "key_features": ["最重要的3-5个结构特征"],\n'
+        '  "trend_assessment": "当前趋势方向和强度（1-2句）",\n'
+        '  "volume_assessment": "量能特征（1句）",\n'
+        '  "next_scenario": "最可能的后续发展（1-2句）",\n'
+        '  "reasoning": "综合分析（2-3句）"\n'
+        "}"
+    )
+
+    top3 = [
+        f"{p['pattern_id']} {p['pattern_name']} ({p['direction']}) 得分={p['total_score']:.0f} "
+        f"{'[已触发]' if p['trigger_met'] else ''}"
+        for p in pattern_scores[:3]
+    ]
+    key_ind_keys = ('max_advance_45', 'max_advance_40', 'platform_range_ratio',
+                    'pullback_ratio', 'atr_ratio', 'rsi14', 'bb_width')
+    key_raw = {}
+    if pattern_scores:
+        key_raw = {k: v for k, v in pattern_scores[0]['raw_values'].items()
+                   if k in key_ind_keys}
+
+    payload = {
+        'symbol':          symbol,
+        'timeframe':       timeframe,
+        'analysis_period': (
+            f"{start_bar.strftime('%Y-%m-%d %H:%M')} → "
+            f"{end_bar.strftime('%Y-%m-%d %H:%M')} ({lookback}根K线)"
+        ),
+        'market_regime':   regime_result.regime.value,
+        'regime_score':    regime_result.score,
+        'trend_score':     regime_result.trend_score,
+        'vol_score':       regime_result.vol_score,
+        'top3_pattern_scores': top3,
+        'key_indicators':  key_raw,
+        'regime_meta':     {k: (round(v, 4) if isinstance(v, float) else v)
+                            for k, v in regime_result.meta.items()},
+    }
+
+    return await client.chat_json(system_prompt, json.dumps(payload, ensure_ascii=False))
+
+
 # ── 启动 ──────────────────────────────────────────────────────────────────────
 
 def create_app() -> web.Application:
@@ -408,6 +587,7 @@ def create_app() -> web.Application:
     app.router.add_get('/api/regime-stats',  handle_regime_stats)
     app.router.add_get('/api/scan-history',  handle_scan_history)
     app.router.add_post('/api/run-backtest', handle_run_backtest)
+    app.router.add_post('/api/analyze',      handle_analyze)
     app.router.add_static('/static',         STATIC_DIR)
     return app
 
