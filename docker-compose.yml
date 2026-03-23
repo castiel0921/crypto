@@ -1,0 +1,22 @@
+services:
+  pattern-scanner:
+    build: .
+    container_name: pattern-scanner
+    ports:
+      - "8082:8082"
+    volumes:
+      - pattern_scanner_data:/app/data
+    env_file:
+      - .env.pattern-scanner
+    environment:
+      # 覆盖 .env 中的 DB 路径，指向容器内 volume
+      - PATTERN_SCANNER_DB_URL=sqlite+aiosqlite:////app/data/pattern_scanner.db
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  pattern_scanner_data:

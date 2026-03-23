@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+.env
+*.db
+*.log
+.github
+deploy/systemd
+PatternScanner_PRD_*.docx
+pattern_scanner/tests
