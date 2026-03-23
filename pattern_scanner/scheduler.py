@@ -186,7 +186,7 @@ class PatternScannerScheduler:
             from .backtest.stats_builder import BacktestStatsBuilder, BacktestConfig
             repo    = PatternRepository()
             builder = BacktestStatsBuilder(repo)
-            kline_data = await _load_klines_from_db(repo, self._timeframe)
+            kline_data = await _load_klines_from_db(repo, self._timeframes[0])
             await builder.build_all(kline_data, BacktestConfig())
             logger.info('Backtest stats job done')
         except Exception as e:
