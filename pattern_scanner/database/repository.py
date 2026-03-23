@@ -191,13 +191,16 @@ class PatternRepository:
     async def upsert_symbols(self, symbol_infos: list[dict]) -> None:
         """upsert symbol_universe；symbol_infos 为含 symbol/is_active/exclude_reason 等的 dict 列表"""
         async with get_session() as session:
+            syms = [info['symbol'] for info in symbol_infos]
+            # 一次性批量查出已存在的记录，避免循环内 SELECT 触发 autoflush 导致重复键冲突
+            result = await session.execute(
+                select(SymbolUniverseORM).where(SymbolUniverseORM.symbol.in_(syms))
+            )
+            existing_map: dict[str, SymbolUniverseORM] = {row.symbol: row for row in result.scalars()}
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             for info in symbol_infos:
                 sym = info['symbol']
-                existing = await session.execute(
-                    select(SymbolUniverseORM).where(SymbolUniverseORM.symbol == sym)
-                )
-                row = existing.scalar_one_or_none()
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                row = existing_map.get(sym)
                 if row is None:
                     session.add(SymbolUniverseORM(
                         symbol          = sym,
