@@ -90,6 +90,14 @@
   .str-strong { color: var(--green); font-size: 11px; font-weight: 600; }
   .str-medium { color: var(--yellow); font-size: 11px; }
   .str-weak   { color: var(--red); font-size: 11px; }
+  /* 周期切换按钮 */
+  .tf-btn { background: var(--card); border: 1px solid var(--border); color: var(--text2);
+            padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .tf-btn.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+  /* 周期 badge */
+  .tf-4h  { background:#1a2a3a; color:var(--blue);   font-size:10px; padding:1px 5px; border-radius:3px; }
+  .tf-1h  { background:#1a3a2a; color:#4fc; font-size:10px; padding:1px 5px; border-radius:3px; }
+  .tf-15m { background:#2a1a3a; color:#c8f; font-size:10px; padding:1px 5px; border-radius:3px; }
 
   /* ── 分数条 ── */
   .score-wrap { display: flex; align-items: center; gap: 8px; }
@@ -231,6 +239,14 @@
         <option value="48">48h</option>
         <option value="168">7天</option>
       </select>
+      <div class="filter-sep"></div>
+      <label>周期</label>
+      <div style="display:flex;gap:4px">
+        <button class="tf-btn active" onclick="setTF('', this)">全部</button>
+        <button class="tf-btn" onclick="setTF('4h', this)">4h</button>
+        <button class="tf-btn" onclick="setTF('1h', this)">1h</button>
+        <button class="tf-btn" onclick="setTF('15m', this)">15m</button>
+      </div>
     </div>
 
     <div id="quality-hint" class="quality-hint hidden">
@@ -249,13 +265,14 @@
             <th>得分</th>
             <th>体制</th>
             <th>强度</th>
+            <th>周期</th>
             <th>触发</th>
             <th>LLM置信</th>
             <th>K线时间 / 分析窗口</th>
           </tr>
         </thead>
         <tbody id="result-tbody">
-          <tr><td colspan="9" class="loading">加载中...</td></tr>
+          <tr><td colspan="10" class="loading">加载中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -373,6 +390,15 @@ let _patternMap   = {};   // pattern_id → {min_bars, timeframes}
 let _stats        = {};
 let _backtest     = [];
 
+// ── 周期过滤 ─────────────────────────────────────────────────────────────────
+let _tfFilter = '';
+function setTF(tf, el) {
+  _tfFilter = tf;
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadResults();
+}
+
 // ── 标签切换 ────────────────────────────────────────────────────────────────
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -386,8 +412,9 @@ function switchTab(name, el) {
 // ── 加载数据 ─────────────────────────────────────────────────────────────────
 async function loadResults() {
   const hours = document.getElementById('f-hours').value;
+  const tfParam = _tfFilter ? `&tf=${_tfFilter}` : '';
   try {
-    const r = await fetch(`/api/results?limit=500&hours=${hours}`);
+    const r = await fetch(`/api/results?limit=500&hours=${hours}${tfParam}`);
     const d = await r.json();
     _results = d.results || [];
     renderResults();
@@ -481,7 +508,7 @@ function renderResults() {
 
   if (!rows.length) {
     document.getElementById('result-tbody').innerHTML =
-      `<tr><td colspan="9" class="empty"><div class="icon">🔍</div>暂无匹配结果</td></tr>`;
+      `<tr><td colspan="10" class="empty"><div class="icon">🔍</div>暂无匹配结果</td></tr>`;
     return;
   }
 
@@ -537,6 +564,7 @@ function renderResults() {
       </td>
       <td><span class="pill pill-${regClass}">${regime.replace('_',' ')}</span></td>
       <td>${strHtml}</td>
+      <td><span class="tf-${(r.timeframe||'4h').replace('m','m')}">${r.timeframe||'4h'}</span></td>
       <td class="${r.trigger_met ? 'trigger-yes' : 'trigger-no'}">${r.trigger_met ? '✓ 触发' : '—'}</td>
       <td>${llmHtml}</td>
       <td style="font-size:12px">
@@ -870,7 +898,7 @@ function buildDetailCell(r, pDef, winStr, barTime) {
     ? `<div class="llm-reasoning"><b style="color:var(--blue)">LLM 分析</b>（置信 ${r.llm_confidence || '—'}，风险 ${r.llm_risk || '—'}）<br>${r.llm_reasoning}</div>`
     : '';
 
-  return `<td colspan="9">
+  return `<td colspan="10">
     <div class="detail-panel">
       <div class="detail-block">
         ${timeSummary}

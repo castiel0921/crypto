@@ -32,15 +32,22 @@ ENV_DB_URL        = 'PATTERN_SCANNER_DB_URL'
 ENV_API_KEY       = 'DEEPSEEK_API_KEY'
 ENV_LLM_BASE_URL  = 'LLM_BASE_URL'
 ENV_LLM_MODEL     = 'LLM_MODEL'
-ENV_TIMEFRAME     = 'PATTERN_SCANNER_TIMEFRAME'
+ENV_TIMEFRAMES    = 'PATTERN_SCANNER_TIMEFRAMES'   # comma-separated, e.g. "4h,1h,15m"
 ENV_KLINE_BARS    = 'PATTERN_SCANNER_KLINE_BARS'
 ENV_RUN_LLM       = 'PATTERN_SCANNER_RUN_LLM'
 
-DEFAULT_DB_URL   = 'sqlite+aiosqlite:///./pattern_scanner.db'
-DEFAULT_TF       = '4h'
-DEFAULT_LLM_URL  = 'https://api.deepseek.com'
+DEFAULT_DB_URL    = 'sqlite+aiosqlite:///./pattern_scanner.db'
+DEFAULT_TFS       = ['4h', '1h', '15m']
+DEFAULT_LLM_URL   = 'https://api.deepseek.com'
 DEFAULT_LLM_MODEL = 'deepseek-chat'
-STALE_MINUTES    = 35
+STALE_MINUTES     = 35
+
+# 每个周期对应的 kline 抓取条数和调度规则
+TF_CONFIGS: dict[str, dict] = {
+    '4h':  {'kline_bars': 500,  'cron': {'minute': 5},               'stale_min': 35},
+    '1h':  {'kline_bars': 500,  'cron': {'minute': 6},               'stale_min': 35},
+    '15m': {'kline_bars': 1000, 'cron': {'minute': '3,18,33,48'},    'stale_min': 10},
+}
 
 
 class PatternScannerScheduler:
@@ -51,20 +58,17 @@ class PatternScannerScheduler:
 
     def __init__(
         self,
-        db_url:      Optional[str] = None,
-        api_key:     Optional[str] = None,
-        timeframe:   str = DEFAULT_TF,
-        kline_bars:  int = 500,
-        run_llm:     bool = True,
-        llm_model:   str = '',
-        llm_base_url: str = '',
-        web_host:    str = '0.0.0.0',
-        web_port:    int = 8082,
+        db_url:       Optional[str]        = None,
+        api_key:      Optional[str]        = None,
+        timeframes:   Optional[list[str]]  = None,
+        run_llm:      bool                 = True,
+        llm_model:    str                  = '',
+        llm_base_url: str                  = '',
+        web_host:     str                  = '0.0.0.0',
+        web_port:     int                  = 8082,
     ):
         self._db_url      = db_url      or os.environ.get(ENV_DB_URL, DEFAULT_DB_URL)
         self._api_key     = api_key     or os.environ.get(ENV_API_KEY, '')
-        self._timeframe   = timeframe   or os.environ.get(ENV_TIMEFRAME, DEFAULT_TF)
-        self._kline_bars  = kline_bars
         self._run_llm     = run_llm
         self._llm_model   = llm_model   or os.environ.get(ENV_LLM_MODEL, DEFAULT_LLM_MODEL)
         self._llm_base_url = llm_base_url or os.environ.get(ENV_LLM_BASE_URL, DEFAULT_LLM_URL)
@@ -73,17 +77,33 @@ class PatternScannerScheduler:
         self._scheduler   = AsyncIOScheduler(timezone='UTC')
         self._running     = False
 
+        # 支持的周期列表（从参数、环境变量或默认值取）
+        env_tfs = os.environ.get(ENV_TIMEFRAMES, '')
+        if timeframes:
+            self._timeframes = timeframes
+        elif env_tfs:
+            self._timeframes = [t.strip() for t in env_tfs.split(',') if t.strip()]
+        else:
+            self._timeframes = DEFAULT_TFS
+
     def setup(self) -> None:
-        """注册所有定时任务"""
-        # 主扫描：每1小时，整点后5分钟
-        self._scheduler.add_job(
-            self._run_scan_job,
-            trigger = CronTrigger(minute=5),
-            id      = 'scan_1h',
-            name    = 'Pattern Scan 1h',
-            replace_existing = True,
-            misfire_grace_time = 300,
-        )
+        """注册所有定时任务（每个周期独立 job）"""
+        for tf in self._timeframes:
+            cfg = TF_CONFIGS.get(tf)
+            if cfg is None:
+                logger.warning('Unknown timeframe %s, skipping', tf)
+                continue
+            self._scheduler.add_job(
+                self._run_scan_job,
+                trigger            = CronTrigger(**cfg['cron']),
+                id                 = f'scan_{tf}',
+                name               = f'Pattern Scan {tf}',
+                kwargs             = {'timeframe': tf, 'kline_bars': cfg['kline_bars']},
+                replace_existing   = True,
+                misfire_grace_time = cfg['stale_min'] * 60,
+            )
+            logger.info('Registered scan job: %s cron=%s bars=%d',
+                        tf, cfg['cron'], cfg['kline_bars'])
 
         # 回测统计：每天凌晨2:30 UTC
         self._scheduler.add_job(
@@ -141,25 +161,24 @@ class PatternScannerScheduler:
 
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def _run_scan_job(self) -> None:
-        logger.info('Starting scan job [tf=%s]', self._timeframe)
+    async def _run_scan_job(self, timeframe: str = '4h', kline_bars: int = 500) -> None:
+        logger.info('Starting scan job [tf=%s bars=%d]', timeframe, kline_bars)
         try:
             summary = await run_full_pipeline(
                 db_url        = self._db_url,
                 api_key       = self._api_key,
-                timeframe     = self._timeframe,
-                kline_bars    = self._kline_bars,
+                timeframe     = timeframe,
+                kline_bars    = kline_bars,
                 run_llm       = self._run_llm and bool(self._api_key),
                 llm_model     = self._llm_model,
                 llm_base_url  = self._llm_base_url,
             )
             logger.info(
-                'Scan job done: %d symbols scanned, %d patterns found',
-                summary.symbols_scannable,
-                summary.patterns_found,
+                'Scan job done [tf=%s]: %d symbols scanned, %d patterns found',
+                timeframe, summary.symbols_scannable, summary.patterns_found,
             )
         except Exception as e:
-            logger.error('Scan job failed: %s', e, exc_info=True)
+            logger.error('Scan job failed [tf=%s]: %s', timeframe, e, exc_info=True)
 
     async def _run_backtest_job(self) -> None:
         logger.info('Starting backtest stats job')
@@ -187,9 +206,12 @@ class PatternScannerScheduler:
         except Exception as e:
             logger.debug('Stale check error: %s', e)
 
-    async def trigger_scan_now(self) -> None:
-        """立即触发一次扫描（手动调用）"""
-        await self._run_scan_job()
+    async def trigger_scan_now(self, timeframe: Optional[str] = None) -> None:
+        """立即触发扫描（手动调用）：指定周期或全部周期"""
+        tfs = [timeframe] if timeframe else self._timeframes
+        for tf in tfs:
+            cfg = TF_CONFIGS.get(tf, {'kline_bars': 500})
+            await self._run_scan_job(timeframe=tf, kline_bars=cfg['kline_bars'])
 
 
 async def _load_klines_from_db(
@@ -225,22 +247,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Pattern Scanner Scheduler')
     parser.add_argument('--db-url',     default=None)
     parser.add_argument('--api-key',    default=None)
-    parser.add_argument('--timeframe',  default='4h')
-    parser.add_argument('--kline-bars', type=int, default=500)
+    parser.add_argument('--timeframes', default=None,
+                        help='逗号分隔的周期列表，如 4h,1h,15m（默认全部）')
     parser.add_argument('--no-llm',     action='store_true')
     parser.add_argument('--run-once',   action='store_true', help='只执行一次后退出')
+    parser.add_argument('--run-once-tf', default=None,
+                        help='run-once 时只扫描指定周期')
     args = parser.parse_args()
+
+    tfs = [t.strip() for t in args.timeframes.split(',')] if args.timeframes else None
 
     scheduler = PatternScannerScheduler(
         db_url     = args.db_url,
         api_key    = args.api_key,
-        timeframe  = args.timeframe,
-        kline_bars = args.kline_bars,
+        timeframes = tfs,
         run_llm    = not args.no_llm,
     )
 
     if args.run_once:
-        asyncio.run(scheduler.trigger_scan_now())
+        asyncio.run(scheduler.trigger_scan_now(timeframe=args.run_once_tf))
     else:
         scheduler.setup()
         asyncio.run(scheduler.start())

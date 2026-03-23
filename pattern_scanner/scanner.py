@@ -105,11 +105,12 @@ class PatternScanner:
         if filter_hits:
             return filter_hits
 
-        # 找出当前体制下适用的形态（A/B类）
+        # 找出当前体制+周期下适用的形态（A/B类）
         active = [
             p for p in self.patterns
             if p.category in ('A', 'B')
             and regime_result.regime.value in p.regime_filter
+            and (not p.timeframes or tf in p.timeframes)
         ]
 
         results: list[PatternScanResult] = []
@@ -248,7 +249,9 @@ class PatternScanner:
         评估 C 类过滤形态（C1/C2）。
         任意一个过滤形态命中（字段命中数 >= filter_min），则返回过滤结果，终止后续识别。
         """
-        filter_patterns = [p for p in self.patterns if p.category == 'C']
+        filter_patterns = [p for p in self.patterns
+                           if p.category == 'C'
+                           and (not p.timeframes or tf in p.timeframes)]
         hits: list[PatternScanResult] = []
 
         for pattern in filter_patterns:

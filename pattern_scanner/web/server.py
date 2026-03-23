@@ -87,6 +87,7 @@ async def handle_results(request: web.Request) -> web.Response:
     direction    = request.rel_url.query.get('direction')
     min_score    = float(request.rel_url.query.get('min_score', '0'))
     hours        = int(request.rel_url.query.get('hours', '24'))
+    tf_filter    = request.rel_url.query.get('tf')  # '4h' / '1h' / '15m' / None
 
     since = datetime.utcnow() - timedelta(hours=hours)
 
@@ -106,6 +107,8 @@ async def handle_results(request: web.Request) -> web.Response:
                 q = q.where(PatternScanResultORM.pattern_id == pattern_id)
             if direction:
                 q = q.where(PatternScanResultORM.direction == direction)
+            if tf_filter:
+                q = q.where(PatternScanResultORM.timeframe == tf_filter)
 
             rows = (await session.execute(q)).scalars().all()
 
