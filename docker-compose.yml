@@ -1,16 +1,39 @@
 services:
+
+  db:
+    image: mysql:8.0
+    container_name: pattern-scanner-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootsecret
+      MYSQL_DATABASE: pattern_scanner
+      MYSQL_USER: scanner
+      MYSQL_PASSWORD: scannerpwd
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"          # 本地可用 MySQL 客户端直接连
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-uroot", "-prootsecret"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
   pattern-scanner:
     build: .
     container_name: pattern-scanner
     ports:
       - "8082:8082"
-    volumes:
-      - pattern_scanner_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
     env_file:
       - .env.pattern-scanner
     environment:
-      # 覆盖 .env 中的 DB 路径，指向容器内 volume
-      - PATTERN_SCANNER_DB_URL=sqlite+aiosqlite:////app/data/pattern_scanner.db
+      # MySQL URL（容器内网络，服务名 db 作为 host）
+      - PATTERN_SCANNER_DB_URL=mysql+aiomysql://scanner:scannerpwd@db:3306/pattern_scanner
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -19,4 +42,4 @@ services:
         max-file: "3"
 
 volumes:
-  pattern_scanner_data:
+  mysql_data:
