@@ -182,6 +182,7 @@
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 </style>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -1067,6 +1068,8 @@ function renderDiagnose(d) {
   const sb = d.start_bar ? new Date(d.start_bar).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
   const eb = d.end_bar   ? new Date(d.end_bar).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
 
+  const chartHtml = `<div id="dg-chart" style="width:100%;height:380px;margin-bottom:20px;border-radius:6px;overflow:hidden;background:#0d1117"></div>`;
+
   const regimeCard = `<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
     <div class="stat-card"><div class="stat-label">交易对</div><div class="stat-value" style="font-size:18px">${d.symbol.replace('USDT','')}/USDT</div></div>
     <div class="stat-card"><div class="stat-label">分析区间</div><div class="stat-value" style="font-size:14px">${sb} → ${eb}</div><div class="stat-label">${d.bars_analyzed}根${d.timeframe}K线</div></div>
@@ -1149,13 +1152,41 @@ function renderDiagnose(d) {
     </div>`;
   }
 
-  return `<div style="padding:16px">
+  const html = `<div style="padding:16px">
+    ${chartHtml}
     ${regimeCard}
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
       <div style="flex:1;min-width:320px">${scoresPanel}${topDetail}</div>
       <div style="flex:1;min-width:300px">${llmPanel}</div>
     </div>
   </div>`;
+
+  // 渲染 K 线图（需要在 DOM 插入后执行）
+  setTimeout(() => {
+    const el = document.getElementById('dg-chart');
+    if (!el || !d.klines || !d.klines.length) return;
+    const chart = LightweightCharts.createChart(el, {
+      layout: { background: { color: '#0d1117' }, textColor: '#c9d1d9' },
+      grid:   { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: '#30363d' },
+      timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+      width:  el.clientWidth,
+      height: 380,
+    });
+    const candle = chart.addCandlestickSeries({
+      upColor: '#26a641', downColor: '#f85149',
+      borderUpColor: '#26a641', borderDownColor: '#f85149',
+      wickUpColor: '#26a641', wickDownColor: '#f85149',
+    });
+    candle.setData(d.klines);
+    chart.timeScale().fitContent();
+    // 响应式宽度
+    const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth }));
+    ro.observe(el);
+  }, 0);
+
+  return html;
 }
 </script>
 </body>

@@ -522,6 +522,20 @@ async def handle_analyze(request: web.Request) -> web.Response:
                 logger.warning('LLM structure diagnosis failed: %s', e)
                 llm_analysis = {'error': str(e)}
 
+        # 返回最后 lookback 根 K 线数据供前端绘图
+        plot_df = df.iloc[-lookback:]
+        klines_data = [
+            {
+                'time':   int(ts.timestamp()),
+                'open':   round(float(row.open),   6),
+                'high':   round(float(row.high),   6),
+                'low':    round(float(row.low),    6),
+                'close':  round(float(row.close),  6),
+                'volume': round(float(row.volume), 2),
+            }
+            for ts, row in plot_df.iterrows()
+        ]
+
         return _json({
             'symbol':         symbol,
             'timeframe':      timeframe,
@@ -537,6 +551,7 @@ async def handle_analyze(request: web.Request) -> web.Response:
             'pattern_scores': pattern_scores,
             'top_pattern':    top,
             'llm_analysis':   llm_analysis,
+            'klines':         klines_data,
         })
     except Exception as e:
         logger.error('handle_analyze error: %s', e, exc_info=True)
