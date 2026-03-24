@@ -358,11 +358,20 @@
 
   <!-- ── K线诊断页 ── -->
   <div id="tab-diagnose" class="hidden">
+    <datalist id="dg-symbols-list"></datalist>
     <div class="filter-bar" style="gap:12px;flex-wrap:wrap">
       <label>交易对</label>
-      <input id="dg-symbol" type="text" placeholder="BTC" style="width:90px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
-      <label>截止时间</label>
-      <input id="dg-endtime" type="datetime-local" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+      <input id="dg-symbol" type="text" list="dg-symbols-list" placeholder="BTC / ETHUSDT" style="width:130px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+      <label>截至</label>
+      <select id="dg-timepreset" onchange="onDgTimePreset()" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+        <option value="now" selected>当前</option>
+        <option value="1d">1天前</option>
+        <option value="3d">3天前</option>
+        <option value="7d">7天前</option>
+        <option value="30d">30天前</option>
+        <option value="custom">自定义</option>
+      </select>
+      <input id="dg-endtime" type="datetime-local" style="display:none;background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
       <label>回看K线</label>
       <select id="dg-lookback" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
         <option value="50">50根</option>
@@ -372,8 +381,9 @@
       </select>
       <label>周期</label>
       <select id="dg-tf" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
-        <option value="4h" selected>4h</option>
+        <option value="15m">15m</option>
         <option value="1h">1h</option>
+        <option value="4h" selected>4h</option>
         <option value="1d">1d</option>
       </select>
       <button onclick="runDiagnose()" style="background:var(--blue);color:#fff;border:none;padding:6px 18px;border-radius:4px;cursor:pointer;font-size:13px">开始诊断</button>
@@ -407,6 +417,7 @@ function switchTab(name, el) {
     document.getElementById('tab-' + n).classList.toggle('hidden', n !== name);
   });
   if (name === 'backtest' && !_backtest.length) loadBacktest();
+  if (name === 'diagnose') loadDgSymbols();
 }
 
 // ── 加载数据 ─────────────────────────────────────────────────────────────────
@@ -930,9 +941,38 @@ loadAll();
 setInterval(loadAll, 60000); // 每分钟自动刷新
 
 // ── K线诊断 ──────────────────────────────────────────────────────────────────
+let _dgSymbolsLoaded = false;
+async function loadDgSymbols() {
+  if (_dgSymbolsLoaded) return;
+  try {
+    const r = await fetch('/api/symbols');
+    const d = await r.json();
+    const dl = document.getElementById('dg-symbols-list');
+    dl.innerHTML = (d.symbols || []).map(s => `<option value="${s}">`).join('');
+    _dgSymbolsLoaded = true;
+  } catch(e) {}
+}
+
+function onDgTimePreset() {
+  const v = document.getElementById('dg-timepreset').value;
+  document.getElementById('dg-endtime').style.display = v === 'custom' ? '' : 'none';
+}
+
+function getDgEndTime() {
+  const v = document.getElementById('dg-timepreset').value;
+  if (v === 'now') return null;
+  if (v === 'custom') {
+    const val = document.getElementById('dg-endtime').value;
+    return val ? new Date(val).toISOString() : null;
+  }
+  const days = parseInt(v);
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
 async function runDiagnose() {
   const sym      = document.getElementById('dg-symbol').value.trim();
-  const endtime  = document.getElementById('dg-endtime').value;
   const lookback = document.getElementById('dg-lookback').value;
   const tf       = document.getElementById('dg-tf').value;
   if (!sym) { alert('请输入交易对'); return; }
@@ -942,7 +982,8 @@ async function runDiagnose() {
 
   try {
     const body = { symbol: sym, timeframe: tf, lookback_bars: parseInt(lookback) };
-    if (endtime) body.end_time = new Date(endtime).toISOString();
+    const endTime = getDgEndTime();
+    if (endTime) body.end_time = endTime;
     const r = await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const d = await r.json();
     if (d.error) { el.innerHTML = `<div class="loading" style="color:var(--red)">${d.error}</div>`; return; }

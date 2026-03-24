@@ -15,7 +15,7 @@ from aiohttp import web
 
 from ..database.repository import PatternRepository
 from ..database.session import get_session
-from ..database.models import PatternScanResultORM, PatternBacktestStatsORM
+from ..database.models import PatternScanResultORM, PatternBacktestStatsORM, SymbolUniverseORM
 from ..patterns.definitions import ALL_PATTERNS, PATTERN_REGISTRY
 from sqlalchemy import select, desc, func
 
@@ -437,15 +437,29 @@ async def handle_analyze(request: web.Request) -> web.Response:
             krows = (await session.execute(q)).scalars().all()
 
         if not krows:
-            return _json({'error': f'No kline data for {symbol}/{timeframe}'}, status=404)
-
-        # 保留末尾 lookback+200 条（多余的用于指标计算回溯）
-        krows = list(krows)[-(lookback + 200):]
-
-        df = pd.DataFrame([{
-            'open': r.open, 'high': r.high, 'low': r.low,
-            'close': r.close, 'volume': r.volume,
-        } for r in krows], index=pd.DatetimeIndex([r.open_time for r in krows]))
+            # DB 无缓存，直接从 Binance 拉取
+            from ..data.fetcher import BinanceFetcher
+            fetcher = BinanceFetcher()
+            try:
+                end_time_ms = int(end_dt.timestamp() * 1000) if end_dt else None
+                df = await fetcher.fetch_klines(
+                    symbol, timeframe,
+                    limit=lookback + 200,
+                    end_time=end_time_ms,
+                )
+            finally:
+                await fetcher.close()
+            if df.empty:
+                return _json({'error': f'No kline data for {symbol}/{timeframe}'}, status=404)
+            # fetch_klines 返回以 open_time(ms) 为 index 的 DataFrame，转为 datetime index
+            df.index = pd.to_datetime(df.index, unit='ms', utc=True).tz_localize(None)
+        else:
+            # 保留末尾 lookback+200 条（多余的用于指标计算回溯）
+            krows = list(krows)[-(lookback + 200):]
+            df = pd.DataFrame([{
+                'open': r.open, 'high': r.high, 'low': r.low,
+                'close': r.close, 'volume': r.volume,
+            } for r in krows], index=pd.DatetimeIndex([r.open_time for r in krows]))
 
         if len(df) < 30:
             return _json({'error': f'Insufficient data: {len(df)} bars'}, status=400)
@@ -580,6 +594,18 @@ async def _llm_structure_diagnosis(
 
 # ── 启动 ──────────────────────────────────────────────────────────────────────
 
+async def handle_symbols(request: web.Request) -> web.Response:
+    """GET /api/symbols — 返回活跃交易对列表（用于诊断页下拉）"""
+    async with get_session() as session:
+        result = await session.execute(
+            select(SymbolUniverseORM.symbol)
+            .where(SymbolUniverseORM.is_active == True)
+            .order_by(SymbolUniverseORM.symbol.asc())
+        )
+        symbols = [r[0] for r in result.all()]
+    return _json({'symbols': symbols})
+
+
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get('/',                  handle_index)
@@ -589,6 +615,7 @@ def create_app() -> web.Application:
     app.router.add_get('/api/backtest',       handle_backtest)
     app.router.add_get('/api/regime-stats',  handle_regime_stats)
     app.router.add_get('/api/scan-history',  handle_scan_history)
+    app.router.add_get('/api/symbols',       handle_symbols)
     app.router.add_post('/api/run-backtest', handle_run_backtest)
     app.router.add_post('/api/analyze',      handle_analyze)
     app.router.add_static('/static',         STATIC_DIR)
