@@ -496,8 +496,14 @@ async def handle_analyze(request: web.Request) -> web.Response:
         pattern_scores.sort(key=lambda x: x['total_score'], reverse=True)
         top = pattern_scores[0] if pattern_scores else None
 
-        start_bar = krows[-lookback].open_time if len(krows) >= lookback else krows[0].open_time
-        end_bar   = krows[-1].open_time
+        # krows 可能为空（Binance 直拉路径），改从 df.index 取时间
+        if krows:
+            start_bar = krows[-lookback].open_time if len(krows) >= lookback else krows[0].open_time
+            end_bar   = krows[-1].open_time
+        else:
+            idx = df.index
+            start_bar = idx[-lookback].to_pydatetime() if len(idx) >= lookback else idx[0].to_pydatetime()
+            end_bar   = idx[-1].to_pydatetime()
 
         # LLM 结构诊断（可选）
         llm_analysis = None
