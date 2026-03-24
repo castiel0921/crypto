@@ -28,8 +28,8 @@ EXCHANGE_ENDPOINT  = '/fapi/v1/exchangeInfo'
 
 MAX_RETRIES        = 3
 RETRY_BASE_DELAY   = 1.0   # seconds
-SEMAPHORE_LIMIT    = 10    # max concurrent requests
-REQUEST_INTERVAL   = 0.05  # 50ms between requests
+SEMAPHORE_LIMIT    = 3     # max concurrent requests (conservative to avoid IP ban)
+REQUEST_INTERVAL   = 0.2   # 200ms between requests
 
 KLINE_COLUMNS = [
     'open_time', 'open', 'high', 'low', 'close', 'volume',
@@ -184,6 +184,11 @@ class BinanceFetcher(MarketDataProvider):
                     async with session.get(
                         url, params=params, proxy=self._proxy
                     ) as resp:
+                        if resp.status == 418:
+                            # IP banned — don't retry, surface immediately
+                            text = await resp.text()
+                            raise FetchError(f'HTTP 418 for {endpoint}: {text[:300]}')
+
                         if resp.status == 429:
                             retry_after = float(resp.headers.get('Retry-After', 5))
                             logger.warning('Rate limited, sleeping %.1fs', retry_after)

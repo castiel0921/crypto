@@ -1044,7 +1044,17 @@ async function runDiagnose() {
     if (endTime) body.end_time = endTime;
     const r = await fetch('/api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const d = await r.json();
-    if (d.error) { el.innerHTML = `<div class="loading" style="color:var(--red)">${d.error}</div>`; return; }
+    if (d.error) {
+      let msg = d.error;
+      const banMatch = msg.match(/"bannedUntil"\s*:\s*(\d+)|banned until (\d+)/i) || msg.match(/until\s+(\d{13})/i);
+      if (banMatch) {
+        const ts = parseInt(banMatch[1] || banMatch[2]);
+        const expire = new Date(ts);
+        const bj = expire.toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hour:'2-digit', minute:'2-digit', hour12:false});
+        msg = `Binance IP 封禁，解封时间约 ${bj} 北京时间`;
+      }
+      el.innerHTML = `<div class="loading" style="color:var(--red)">${msg}</div>`; return;
+    }
     el.innerHTML = renderDiagnose(d);
   } catch(e) {
     el.innerHTML = `<div class="loading" style="color:var(--red)">请求失败: ${e}</div>`;
