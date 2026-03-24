@@ -356,6 +356,27 @@
     </div>
   </div>
 
+  <!-- 自定义时间弹层 -->
+  <div id="dg-time-popup" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:999;background:rgba(0,0,0,0.5)" onclick="if(event.target===this)closeDgTimePopup()">
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;min-width:280px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:16px;color:var(--text)">选择截止时间</div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:4px">日期</div>
+          <input id="dg-custom-date" type="date" style="width:100%;box-sizing:border-box;background:#1a1a2e;border:1px solid var(--border);color:var(--text);padding:8px;border-radius:4px;font-size:14px">
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:4px">时间</div>
+          <input id="dg-custom-time" type="time" style="width:100%;box-sizing:border-box;background:#1a1a2e;border:1px solid var(--border);color:var(--text);padding:8px;border-radius:4px;font-size:14px">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">
+        <button onclick="closeDgTimePopup()" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px">取消</button>
+        <button onclick="confirmDgTimePopup()" style="background:var(--blue);border:none;color:#fff;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px">确认</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── K线诊断页 ── -->
   <div id="tab-diagnose" class="hidden">
     <datalist id="dg-symbols-list"></datalist>
@@ -369,9 +390,9 @@
         <option value="3d">3天前</option>
         <option value="7d">7天前</option>
         <option value="30d">30天前</option>
-        <option value="custom">自定义</option>
+        <option value="custom">自定义…</option>
       </select>
-      <input id="dg-endtime" type="datetime-local" style="display:none;background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
+      <span id="dg-custom-label" style="display:none;font-size:13px;color:var(--yellow);cursor:pointer;text-decoration:underline" onclick="openDgTimePopup()"></span>
       <label>回看K线</label>
       <select id="dg-lookback" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px">
         <option value="50">50根</option>
@@ -953,18 +974,55 @@ async function loadDgSymbols() {
   } catch(e) {}
 }
 
+let _dgCustomTime = null; // ISO string, set by popup confirm
+
 function onDgTimePreset() {
   const v = document.getElementById('dg-timepreset').value;
-  document.getElementById('dg-endtime').style.display = v === 'custom' ? '' : 'none';
+  if (v === 'custom') {
+    openDgTimePopup();
+  } else {
+    _dgCustomTime = null;
+    document.getElementById('dg-custom-label').style.display = 'none';
+  }
+}
+
+function openDgTimePopup() {
+  // 预填当前值
+  if (_dgCustomTime) {
+    const d = new Date(_dgCustomTime);
+    document.getElementById('dg-custom-date').value = d.toISOString().slice(0,10);
+    document.getElementById('dg-custom-time').value = d.toTimeString().slice(0,5);
+  } else {
+    const now = new Date();
+    document.getElementById('dg-custom-date').value = now.toISOString().slice(0,10);
+    document.getElementById('dg-custom-time').value = now.toTimeString().slice(0,5);
+  }
+  document.getElementById('dg-time-popup').style.display = '';
+}
+
+function closeDgTimePopup() {
+  document.getElementById('dg-time-popup').style.display = 'none';
+  // 如果没有确认过，回退到"当前"
+  if (!_dgCustomTime) {
+    document.getElementById('dg-timepreset').value = 'now';
+    document.getElementById('dg-custom-label').style.display = 'none';
+  }
+}
+
+function confirmDgTimePopup() {
+  const date = document.getElementById('dg-custom-date').value;
+  const time = document.getElementById('dg-custom-time').value || '00:00';
+  if (!date) { alert('请选择日期'); return; }
+  _dgCustomTime = new Date(`${date}T${time}:00`).toISOString();
+  document.getElementById('dg-custom-label').textContent = `${date} ${time}`;
+  document.getElementById('dg-custom-label').style.display = '';
+  document.getElementById('dg-time-popup').style.display = 'none';
 }
 
 function getDgEndTime() {
   const v = document.getElementById('dg-timepreset').value;
   if (v === 'now') return null;
-  if (v === 'custom') {
-    const val = document.getElementById('dg-endtime').value;
-    return val ? new Date(val).toISOString() : null;
-  }
+  if (v === 'custom') return _dgCustomTime;
   const days = parseInt(v);
   const d = new Date();
   d.setDate(d.getDate() - days);
